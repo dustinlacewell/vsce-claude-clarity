@@ -35,10 +35,19 @@ if (!dirs.length) {
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const blockRe = new RegExp(escapeRe(START) + "[\\s\\S]*?" + escapeRe(END));
 
-// The shim needs the VS Code API handle to send requests (acquireVsCodeApi is
-// once-only, the app owns it) — so expose the app's copy on window.__ccVsc.
+// The shim needs the VS Code API handle in both directions: outgoing requests
+// (acquireVsCodeApi is once-only, the app owns it) and a tap on the app's own
+// webview->host messages (model switches are only visible there). So wrap the
+// handle: the app sees a 3-method facade whose postMessage mirrors into
+// window.__ccBadgeTx. The bundle only ever uses postMessage/setState/getState.
 const API_ORIG = "let e=acquireVsCodeApi(),";
-const API_PATCHED = "let e=(window.__ccVsc=acquireVsCodeApi()),";
+const API_PATCHED =
+  "let e=(window.__ccVsc=((a)=>({" +
+  "postMessage:(m)=>{try{window.__ccBadgeTx&&window.__ccBadgeTx(m)}catch(_){}return a.postMessage(m)}," +
+  "setState:(s)=>a.setState(s),getState:()=>a.getState()" +
+  "}))(acquireVsCodeApi())),";
+// Earlier releases of this patch, reverted before re-applying.
+const API_PATCHED_LEGACY = ["let e=(window.__ccVsc=acquireVsCodeApi()),"];
 
 let count = 0;
 for (const d of dirs) {
@@ -50,7 +59,7 @@ for (const d of dirs) {
   let src = readFileSync(f, "utf8");
   const had = blockRe.test(src);
   src = src.replace(blockRe, "").replace(/\s+$/, "");
-  src = src.split(API_PATCHED).join(API_ORIG);
+  for (const p of [API_PATCHED, ...API_PATCHED_LEGACY]) src = src.split(p).join(API_ORIG);
   if (!remove) {
     if (src.includes(API_ORIG)) {
       src = src.replace(API_ORIG, API_PATCHED);

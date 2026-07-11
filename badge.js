@@ -131,11 +131,20 @@ function applyEvent(e) {
   const m = e.message;
   let dirty = false;
 
-  // After a compaction the old count is meaningless; drop it until the next
-  // usage-bearing event arrives.
+  // After a compaction the old count is meaningless. Mirror the app's own
+  // context pie (which sets totalTokens to 0 here): show an empty bar, don't
+  // hide it, until the next usage-bearing event arrives.
   if (e.type === "system" && e.subtype === "compact_boundary") {
-    state.used = null;
+    state.used = 0;
     return true;
+  }
+
+  // Each stream opens with a system/init that names the active model — the
+  // earliest model signal on a fresh session, before any assistant event.
+  if (e.type === "system" && e.subtype === "init" &&
+      typeof e.model === "string" && e.model && !e.model.startsWith("<")) {
+    state.model = e.model;
+    dirty = true;
   }
 
   if (m && m.usage && !e.parent_tool_use_id) {
@@ -376,6 +385,28 @@ function start() {
   startPolling();
   setInterval(scheduleRender, 60 * 1000); // keep the reset countdown fresh
 }
+
+// Outgoing tap. Model switches never echo back on the host->webview stream —
+// the picker just sends {type:"request", request:{type:"set_model", model}} —
+// so the applier wraps the app's VS Code API handle and mirrors every
+// webview->host message here.
+window.__ccBadgeTx = (m) => {
+  try {
+    if (!m || m.type !== "request" || !m.request) return;
+    if (m.request.type === "set_model" && m.request.model) {
+      const mo = m.request.model;
+      // value keeps the [1m] variant ("claude-fable-5[1m]") where
+      // resolvedModel sometimes drops it — keep the suffix.
+      let slug = mo.resolvedModel || mo.value || "";
+      if (/\[1m\]/i.test(mo.value || "") && !/\[1m\]/i.test(slug)) slug += "[1m]";
+      if (slug) {
+        state.model = slug;
+        saveState();
+        scheduleRender();
+      }
+    }
+  } catch {}
+};
 
 window.addEventListener("message", (e) => {
   cnt.raw++;
