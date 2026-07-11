@@ -1,0 +1,19 @@
+{
+  "name": "vsce-claude-clarity",
+  "version": "0.1.0",
+  "description": "Show model, context, and rate-limit bars in the Claude Code VS Code extension's input row",
+  "type": "module",
+  "bin": {
+    "vsce-claude-clarity": "./apply.mjs"
+  },
+  "scripts": {
+    "apply": "node apply.mjs",
+    "remove": "node apply.mjs --remove"
+  },
+  "author": "Dustin Lacewell",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ldlework/vsce-claude-clarity"
+  }
+}
