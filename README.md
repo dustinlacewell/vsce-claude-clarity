@@ -6,7 +6,7 @@ Puts the current model, context usage, and rate limits in the Claude Code VS Cod
 [+] [/] [pie]   Fable 5  ctx ▓▓▓░░  5h ▓░░░░ 1h47m  wk ▓░░░░ Wed   [mode] [send]
 ```
 
-- **ctx** — context tokens against a 200k cap, orange past 90%
+- **ctx** — context tokens against the model's real usable window, orange past 90%
 - **5h** — session rate limit, with time until reset
 - **wk** — weekly rate limit, with reset day
 

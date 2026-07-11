@@ -49,6 +49,16 @@ const API_PATCHED =
 // Earlier releases of this patch, reverted before re-applying.
 const API_PATCHED_LEGACY = ["let e=(window.__ccVsc=acquireVsCodeApi()),"];
 
+// Second anchor: expose the session displayed in this webview. The input
+// footer's render reads the session's usageData for the app's own context
+// pie — tap that expression so the badge reads the exact same state. Regex
+// tolerates the minified component name changing between versions.
+const ACTIVE_RE = /b\((\w+),\{usedTokens:e\.usageData\.value\.totalTokens/g;
+const ACTIVE_SUB = "b($1,{usedTokens:(window.__ccActiveSession=e).usageData.value.totalTokens";
+const ACTIVE_PATCHED_RE =
+  /b\((\w+),\{usedTokens:\(window\.__ccActiveSession=e\)\.usageData\.value\.totalTokens/g;
+const ACTIVE_UNSUB = "b($1,{usedTokens:e.usageData.value.totalTokens";
+
 let count = 0;
 for (const d of dirs) {
   const f = join(extRoot, d, "webview", "index.js");
@@ -60,6 +70,7 @@ for (const d of dirs) {
   const had = blockRe.test(src);
   src = src.replace(blockRe, "").replace(/\s+$/, "");
   for (const p of [API_PATCHED, ...API_PATCHED_LEGACY]) src = src.split(p).join(API_ORIG);
+  src = src.replace(ACTIVE_PATCHED_RE, ACTIVE_UNSUB);
   if (!remove) {
     if (src.includes(API_ORIG)) {
       src = src.replace(API_ORIG, API_PATCHED);
@@ -67,6 +78,15 @@ for (const d of dirs) {
       console.warn(
         "WARN " + d + ": acquireVsCodeApi anchor not found — usage polling disabled " +
         "(bars update only on host pushes). The bundle layout likely changed."
+      );
+    }
+    if (ACTIVE_RE.test(src)) {
+      ACTIVE_RE.lastIndex = 0;
+      src = src.replace(ACTIVE_RE, ACTIVE_SUB);
+    } else {
+      console.warn(
+        "WARN " + d + ": input-footer usageData anchor not found — context/model " +
+        "display disabled. The bundle layout likely changed."
       );
     }
     src += "\n" + START + '\n(function(){\n"use strict";\n' + shim + "\n})();\n" + END + "\n";

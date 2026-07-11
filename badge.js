@@ -1,7 +1,13 @@
 // Claude Code webview status badge.
 // Injected into the chat input row (between the left and right button groups):
-//   <model>   <context used · %>   [5h bar]  [wk bar]
-// Data is captured from the host->webview "from-extension" message stream.
+//   <model>   [ctx bar]   [5h bar + reset]   [wk bar + reset day]
+//
+// Context and model are read directly from the app's own session state — the
+// applier patches the input-footer render to expose the displayed session as
+// window.__ccActiveSession, so the badge always agrees with the app's context
+// pie (compaction, model switches, reloads, replays: all the app's problem).
+// Rate limits come from the host's usage_update pushes, plus polling.
+//
 // Toggle verbose logging at runtime: localStorage.setItem("cc-badge-debug","1")
 //
 // This file is the BODY of the shim; the applier wraps it in an IIFE.
@@ -17,32 +23,29 @@ const DEBUG = () => {
 // ---------------------------------------------------------------- state ----
 const state = {
   model: null,        // model slug, e.g. "claude-opus-4-8[1m]" or "default"
-  used: null,         // context tokens (sum of latest assistant message usage)
+  used: null,         // context tokens (the app's usageData.totalTokens)
+  cap: null,          // usable context (the app's pie denominator), null = unknown
   five: null,         // { util: 0..100|null, resets }
   week: null,         // { util, resets }
   rlError: null,      // error string from the host's usage fetch, if any
 };
 
-// Diagnostics surfaced in the badge (text when empty, always in the tooltip)
-// so we can see what actually flows without opening webview devtools.
-const cnt = { raw: 0, ext: 0, io: 0, usg: 0, wu: 0, req: 0, types: {}, ioTypes: {}, ioSkip: {} };
+// Diagnostics surfaced in the badge tooltip so we can see what actually flows
+// without opening webview devtools.
+const cnt = { raw: 0, ext: 0, usg: 0, req: 0, types: {} };
 
-// Full captures exposed on window for one-shot inspection from the webview
-// devtools console: window.__ccBadge (byType = one sample per message type,
-// io = first several io_message payloads, rawTypes = types of ALL window msgs).
-const dbg = (window.__ccBadge = { state, cnt, byType: {}, io: [], rawTypes: {} });
+// Live state exposed for one-shot inspection from the devtools console.
+const dbg = (window.__ccBadge = { state, cnt, byType: {} });
 
 // ------------------------------------------------------------ persistence ----
 // usage_update is only pushed after activity — on a fresh reload nothing
-// arrives, so show the last-known values until fresh data replaces them.
+// arrives until the startup poll answers, so show the last-known rate limits.
+// Context/model need no persistence: the app restores its own session state.
 const LS_KEY = "cc-badge-state";
 
 function saveState() {
   try {
-    localStorage.setItem(
-      LS_KEY,
-      JSON.stringify({ model: state.model, used: state.used, five: state.five, week: state.week })
-    );
+    localStorage.setItem(LS_KEY, JSON.stringify({ five: state.five, week: state.week }));
   } catch {}
 }
 
@@ -50,29 +53,48 @@ function loadState() {
   try {
     const s = JSON.parse(localStorage.getItem(LS_KEY) || "null");
     if (!s) return;
-    if (s.model) state.model = s.model;
-    if (typeof s.used === "number") state.used = s.used;
     if (s.five) state.five = s.five;
     if (s.week) state.week = s.week;
   } catch {}
 }
 
-// ---------------------------------------------------------- data capture ----
+// -------------------------------------------------- app session state poll ----
+// The applier rewrites the footer render so the session whose input row is on
+// screen lands in window.__ccActiveSession. Its fields are preact-ish signals
+// (.value); we poll instead of subscribing to stay decoupled from the
+// signal implementation.
+const PIE_RESERVE = 13000; // the app reserves this many tokens in its pie math
+
+function pollSession() {
+  const s = window.__ccActiveSession;
+  if (!s) return;
+  try {
+    const u = s.usageData && s.usageData.value;
+    if (u && typeof u.totalTokens === "number") {
+      state.used = u.totalTokens;
+      state.cap = u.contextWindow
+        ? Math.max(1, u.contextWindow - (u.maxOutputTokens || 0) - PIE_RESERVE)
+        : null;
+    }
+
+    // What's actually serving beats the picker selection; the picker keeps
+    // the [1m] variant suffix that served-model strings sometimes drop.
+    const sel = s.modelSelection && s.modelSelection.value;
+    const served = s.lastServedModel && s.lastServedModel.value;
+    let slug = served || sel || (s.currentMainLoopModel && s.currentMainLoopModel.value) || null;
+    if (slug && sel && /\[1m\]/i.test(sel) && !/\[1m\]/i.test(slug)) slug += "[1m]";
+    if (slug) state.model = slug;
+  } catch (e) {
+    if (DEBUG()) console.log("[cc-badge] pollSession failed:", e);
+  }
+  scheduleRender();
+}
+
+// ---------------------------------------------------------- rate limits ----
 function pickWindow(w) {
   if (!w || typeof w !== "object") return null;
   const util = typeof w.utilization === "number" ? w.utilization : null;
   return { util, resets: w.resets_at ?? w.resetsAt ?? null };
-}
-
-const seenTypes = new Set();
-
-function usageTotal(u) {
-  return (
-    (u.input_tokens || 0) +
-    (u.cache_creation_input_tokens || 0) +
-    (u.cache_read_input_tokens || 0) +
-    (u.output_tokens || 0)
-  );
 }
 
 function ingest(msg) {
@@ -81,14 +103,9 @@ function ingest(msg) {
   if (typeof msg.type === "string") {
     cnt.types[msg.type] = (cnt.types[msg.type] || 0) + 1;
     if (!dbg.byType[msg.type]) dbg.byType[msg.type] = msg;
-    if (msg.type === "io_message" && dbg.io.length < 6) dbg.io.push(msg);
-  }
-  if (DEBUG() && typeof msg.type === "string" && !seenTypes.has(msg.type)) {
-    seenTypes.add(msg.type);
-    console.log("[cc-badge] first msg type:", msg.type, msg);
   }
 
-  // Rate limits. The host wraps notifications as requests:
+  // The host wraps notifications as requests:
   // {type:"request", requestId, request:{type:"usage_update", utilization}}.
   if (msg.type === "request" && msg.request && msg.request.type === "usage_update") {
     cnt.usg++;
@@ -101,67 +118,7 @@ function ingest(msg) {
       saveState();
     }
     scheduleRender();
-    return;
   }
-
-  // Live conversation events arrive one-by-one as io_message.
-  if (msg.type === "io_message" && msg.message) {
-    cnt.io++;
-    if (applyEvent(msg.message)) saveState();
-    scheduleRender();
-    return;
-  }
-
-  // On reload the transcript is NOT replayed as io_messages — it comes back
-  // in one get_session_request response: {type:"response", response:{messages}}.
-  if (msg.type === "response" && msg.response && Array.isArray(msg.response.messages)) {
-    let dirty = false;
-    for (const e of msg.response.messages) dirty = applyEvent(e) || dirty;
-    if (dirty) { saveState(); scheduleRender(); }
-  }
-}
-
-// Mirror the extension's updateUsage: context = latest top-level assistant
-// message's usage sum (subagent/tool messages carry parent_tool_use_id).
-// Model comes only from assistant events — replayed transcripts end with
-// synthetic/compaction messages whose model is a placeholder like "<synthetic>".
-function applyEvent(e) {
-  if (!e || typeof e !== "object") return false;
-  cnt.ioTypes[e.type || "?"] = (cnt.ioTypes[e.type || "?"] || 0) + 1;
-  const m = e.message;
-  let dirty = false;
-
-  // After a compaction the old count is meaningless. Mirror the app's own
-  // context pie (which sets totalTokens to 0 here): show an empty bar, don't
-  // hide it, until the next usage-bearing event arrives.
-  if (e.type === "system" && e.subtype === "compact_boundary") {
-    state.used = 0;
-    return true;
-  }
-
-  // Each stream opens with a system/init that names the active model — the
-  // earliest model signal on a fresh session, before any assistant event.
-  if (e.type === "system" && e.subtype === "init" &&
-      typeof e.model === "string" && e.model && !e.model.startsWith("<")) {
-    state.model = e.model;
-    dirty = true;
-  }
-
-  if (m && m.usage && !e.parent_tool_use_id) {
-    const t = usageTotal(m.usage);
-    if (t > 0) { state.used = t; cnt.wu++; dirty = true; }
-    else cnt.ioSkip.zero = (cnt.ioSkip.zero || 0) + 1;
-  } else if (m && m.usage) {
-    cnt.ioSkip.parent = (cnt.ioSkip.parent || 0) + 1;
-  } else {
-    cnt.ioSkip.noUsage = (cnt.ioSkip.noUsage || 0) + 1;
-  }
-
-  if (e.type === "assistant" && m && typeof m.model === "string" && !m.model.startsWith("<")) {
-    state.model = m.model;
-    dirty = true;
-  }
-  return dirty;
 }
 
 // ------------------------------------------------------------- formatting ----
@@ -209,7 +166,7 @@ function fmtResetDay(r) {
   return d.toLocaleDateString(undefined, { weekday: "short" });
 }
 
-const CTX_CAP = 200000;
+const CTX_CAP_FALLBACK = 200000; // until the app learns the real window
 
 function bar(pct, short, title, high, suffix) {
   const p = Math.min(100, Math.max(0, pct));
@@ -225,8 +182,10 @@ function bar(pct, short, title, high, suffix) {
 
 function ctxBar() {
   if (state.used == null) return "";
-  const pct = (state.used / CTX_CAP) * 100;
-  const title = "Context " + fmtK(state.used) + " / 200k · " + Math.round(pct) + "%";
+  const cap = state.cap || CTX_CAP_FALLBACK;
+  const pct = (state.used / cap) * 100;
+  const title =
+    "Context " + fmtK(state.used) + " / " + fmtK(cap) + " · " + Math.round(pct) + "%";
   return bar(pct, "ctx", title, pct >= 90);
 }
 
@@ -254,9 +213,9 @@ function render() {
   if (!el) return;
   const types = Object.keys(cnt.types).map((k) => k + ":" + cnt.types[k]).join("  ");
   el.title =
-    "raw=" + cnt.raw + " ext=" + cnt.ext + " io=" + cnt.io + " usg=" + cnt.usg +
-    " req=" + cnt.req + " api=" + !!window.__ccVsc + " wu=" + cnt.wu +
-    " used=" + state.used + " model=" + state.model +
+    "raw=" + cnt.raw + " ext=" + cnt.ext + " usg=" + cnt.usg + " req=" + cnt.req +
+    " api=" + !!window.__ccVsc + " session=" + !!window.__ccActiveSession +
+    " used=" + state.used + " cap=" + state.cap + " model=" + state.model +
     (state.rlError ? "\nusage error: " + state.rlError : "") + "\n" + types;
   el.querySelector(".cc-model").textContent = prettyModel(state.model);
   el.querySelector(".cc-bars").innerHTML =
@@ -270,7 +229,6 @@ const CSS =
   "." + "cc-badge{display:flex;align-items:center;gap:8px;font-size:11px;line-height:1;" +
   "color:var(--app-secondary-foreground,#999);white-space:nowrap;min-width:0;overflow:hidden}" +
   ".cc-badge .cc-model{font-weight:600}" +
-  ".cc-badge .cc-ctx{opacity:.85}" +
   ".cc-badge .cc-bars{display:flex;align-items:center;gap:8px}" +
   ".cc-badge .cc-barwrap{display:flex;align-items:center;gap:4px}" +
   ".cc-badge .cc-barlabel{opacity:.55;font-size:10px}" +
@@ -383,38 +341,14 @@ function start() {
   new MutationObserver(() => inject()).observe(root, { childList: true, subtree: true });
   inject();
   startPolling();
+  setInterval(pollSession, 500);
   setInterval(scheduleRender, 60 * 1000); // keep the reset countdown fresh
 }
-
-// Outgoing tap. Model switches never echo back on the host->webview stream —
-// the picker just sends {type:"request", request:{type:"set_model", model}} —
-// so the applier wraps the app's VS Code API handle and mirrors every
-// webview->host message here.
-window.__ccBadgeTx = (m) => {
-  try {
-    if (!m || m.type !== "request" || !m.request) return;
-    if (m.request.type === "set_model" && m.request.model) {
-      const mo = m.request.model;
-      // value keeps the [1m] variant ("claude-fable-5[1m]") where
-      // resolvedModel sometimes drops it — keep the suffix.
-      let slug = mo.resolvedModel || mo.value || "";
-      if (/\[1m\]/i.test(mo.value || "") && !/\[1m\]/i.test(slug)) slug += "[1m]";
-      if (slug) {
-        state.model = slug;
-        saveState();
-        scheduleRender();
-      }
-    }
-  } catch {}
-};
 
 window.addEventListener("message", (e) => {
   cnt.raw++;
   const d = e.data;
-  const t = d && d.type;
-  if (t) dbg.rawTypes[t] = (dbg.rawTypes[t] || 0) + 1;
-  if (t === "from-extension") ingest(d.message);
-  scheduleRender();
+  if (d && d.type === "from-extension") ingest(d.message);
 });
 
 if (document.readyState === "loading")
