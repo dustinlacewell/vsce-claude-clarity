@@ -2,9 +2,7 @@
 
 Puts the current model, context usage, and rate limits in the Claude Code VS Code extension's input row.
 
-```
-[+] [/] [pie]   Fable 5  ctx ▓▓▓░░  5h ▓░░░░ 1h47m  wk ▓░░░░ Wed   [mode] [send]
-```
+<p align="center"><img src="screenshot.jpg" alt="screenshot"></p>
 
 - **ctx** — context tokens against the model's real usable window, orange past 90%
 - **5h** — session rate limit, with time until reset
