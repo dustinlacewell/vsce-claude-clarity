@@ -20,11 +20,12 @@ const state = {
   used: null,         // context tokens (sum of latest assistant message usage)
   five: null,         // { util: 0..100|null, resets }
   week: null,         // { util, resets }
+  rlError: null,      // error string from the host's usage fetch, if any
 };
 
 // Diagnostics surfaced in the badge (text when empty, always in the tooltip)
 // so we can see what actually flows without opening webview devtools.
-const cnt = { raw: 0, ext: 0, io: 0, usg: 0, wu: 0, types: {} };
+const cnt = { raw: 0, ext: 0, io: 0, usg: 0, wu: 0, req: 0, types: {} };
 
 // Full captures exposed on window for one-shot inspection from the webview
 // devtools console: window.__ccBadge (byType = one sample per message type,
@@ -91,13 +92,15 @@ function ingest(msg) {
   // {type:"request", requestId, request:{type:"usage_update", utilization}}.
   if (msg.type === "request" && msg.request && msg.request.type === "usage_update") {
     cnt.usg++;
+    dbg.lastUsage = msg.request;
     const u = msg.request.utilization;
+    state.rlError = msg.request.error || null;
     if (u) {
-      state.five = pickWindow(u.five_hour);
-      state.week = pickWindow(u.seven_day);
+      state.five = pickWindow(u.fiveHour);
+      state.week = pickWindow(u.sevenDay);
       saveState();
-      scheduleRender();
     }
+    scheduleRender();
     return;
   }
 
@@ -228,7 +231,9 @@ function render() {
   const types = Object.keys(cnt.types).map((k) => k + ":" + cnt.types[k]).join("  ");
   el.title =
     "raw=" + cnt.raw + " ext=" + cnt.ext + " io=" + cnt.io + " usg=" + cnt.usg +
-    " wu=" + cnt.wu + " used=" + state.used + " model=" + state.model + "\n" + types;
+    " req=" + cnt.req + " api=" + !!window.__ccVsc + " wu=" + cnt.wu +
+    " used=" + state.used + " model=" + state.model +
+    (state.rlError ? "\nusage error: " + state.rlError : "") + "\n" + types;
   el.querySelector(".cc-model").textContent = prettyModel(state.model);
   el.querySelector(".cc-bars").innerHTML =
     ctxBar() +
@@ -310,11 +315,35 @@ function requestUsage() {
   try {
     api.postMessage({
       type: "request",
+      channelId: "",
       requestId: "ccbadge-" + ++reqN,
       request: { type: "request_usage_update" },
     });
+    cnt.req++;
+    scheduleRender();
+  } catch (e) {
+    state.rlError = "postMessage failed: " + e;
+  }
+}
+
+// Ship diagnostics into the extension host's output log: the host logs every
+// webview message verbatim ("Received message from webview: ..."), so an
+// unknown-typed message is a free write-to-file channel for debugging.
+function report(tag) {
+  const api = window.__ccVsc;
+  if (!api) return;
+  try {
+    api.postMessage({
+      type: "cc_badge_report",
+      tag,
+      cnt,
+      state,
+      lastUsage: dbg.lastUsage || null,
+    });
   } catch {}
 }
+
+dbg.report = report; // manual trigger from the devtools console
 
 function startPolling() {
   // Retry at startup until the first usage_update lands, then every 5 min.
