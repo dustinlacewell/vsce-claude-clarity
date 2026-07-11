@@ -87,15 +87,17 @@ function ingest(msg) {
     console.log("[cc-badge] first msg type:", msg.type, msg);
   }
 
-  // Rate limits: pushed by the host after activity (never on cold load —
-  // that's what the localStorage fallback covers).
-  if (msg.type === "usage_update" && msg.request && msg.request.utilization) {
+  // Rate limits. The host wraps notifications as requests:
+  // {type:"request", requestId, request:{type:"usage_update", utilization}}.
+  if (msg.type === "request" && msg.request && msg.request.type === "usage_update") {
     cnt.usg++;
     const u = msg.request.utilization;
-    state.five = pickWindow(u.five_hour);
-    state.week = pickWindow(u.seven_day);
-    saveState();
-    scheduleRender();
+    if (u) {
+      state.five = pickWindow(u.five_hour);
+      state.week = pickWindow(u.seven_day);
+      saveState();
+      scheduleRender();
+    }
     return;
   }
 
@@ -118,6 +120,8 @@ function ingest(msg) {
 
 // Mirror the extension's updateUsage: context = latest top-level assistant
 // message's usage sum (subagent/tool messages carry parent_tool_use_id).
+// Model comes only from assistant events — replayed transcripts end with
+// synthetic/compaction messages whose model is a placeholder like "<synthetic>".
 function applyEvent(e) {
   if (!e || typeof e !== "object") return false;
   const m = e.message;
@@ -126,8 +130,10 @@ function applyEvent(e) {
     const t = usageTotal(m.usage);
     if (t > 0) { state.used = t; cnt.wu++; dirty = true; }
   }
-  if (m && typeof m.model === "string") { state.model = m.model; dirty = true; }
-  else if (typeof e.model === "string") { state.model = e.model; dirty = true; }
+  if (e.type === "assistant" && m && typeof m.model === "string" && !m.model.startsWith("<")) {
+    state.model = m.model;
+    dirty = true;
+  }
   return dirty;
 }
 
