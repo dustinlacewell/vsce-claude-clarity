@@ -25,7 +25,7 @@ const state = {
 
 // Diagnostics surfaced in the badge (text when empty, always in the tooltip)
 // so we can see what actually flows without opening webview devtools.
-const cnt = { raw: 0, ext: 0, io: 0, usg: 0, wu: 0, req: 0, types: {} };
+const cnt = { raw: 0, ext: 0, io: 0, usg: 0, wu: 0, req: 0, types: {}, ioTypes: {}, ioSkip: {} };
 
 // Full captures exposed on window for one-shot inspection from the webview
 // devtools console: window.__ccBadge (byType = one sample per message type,
@@ -127,12 +127,27 @@ function ingest(msg) {
 // synthetic/compaction messages whose model is a placeholder like "<synthetic>".
 function applyEvent(e) {
   if (!e || typeof e !== "object") return false;
+  cnt.ioTypes[e.type || "?"] = (cnt.ioTypes[e.type || "?"] || 0) + 1;
   const m = e.message;
   let dirty = false;
+
+  // After a compaction the old count is meaningless; drop it until the next
+  // usage-bearing event arrives.
+  if (e.type === "system" && e.subtype === "compact_boundary") {
+    state.used = null;
+    return true;
+  }
+
   if (m && m.usage && !e.parent_tool_use_id) {
     const t = usageTotal(m.usage);
     if (t > 0) { state.used = t; cnt.wu++; dirty = true; }
+    else cnt.ioSkip.zero = (cnt.ioSkip.zero || 0) + 1;
+  } else if (m && m.usage) {
+    cnt.ioSkip.parent = (cnt.ioSkip.parent || 0) + 1;
+  } else {
+    cnt.ioSkip.noUsage = (cnt.ioSkip.noUsage || 0) + 1;
   }
+
   if (e.type === "assistant" && m && typeof m.model === "string" && !m.model.startsWith("<")) {
     state.model = m.model;
     dirty = true;
