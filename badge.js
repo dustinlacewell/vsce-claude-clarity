@@ -24,7 +24,6 @@ const DEBUG = () => {
 const state = {
   model: null,        // model slug, e.g. "claude-opus-4-8[1m]" or "default"
   used: null,         // context tokens (the app's usageData.totalTokens)
-  cap: null,          // usable context (the app's pie denominator), null = unknown
   five: null,         // { util: 0..100|null, resets }
   week: null,         // { util, resets }
   rlError: null,      // error string from the host's usage fetch, if any
@@ -63,19 +62,12 @@ function loadState() {
 // screen lands in window.__ccActiveSession. Its fields are preact-ish signals
 // (.value); we poll instead of subscribing to stay decoupled from the
 // signal implementation.
-const PIE_RESERVE = 13000; // the app reserves this many tokens in its pie math
-
 function pollSession() {
   const s = window.__ccActiveSession;
   if (!s) return;
   try {
     const u = s.usageData && s.usageData.value;
-    if (u && typeof u.totalTokens === "number") {
-      state.used = u.totalTokens;
-      state.cap = u.contextWindow
-        ? Math.max(1, u.contextWindow - (u.maxOutputTokens || 0) - PIE_RESERVE)
-        : null;
-    }
+    if (u && typeof u.totalTokens === "number") state.used = u.totalTokens;
 
     // What's actually serving beats the picker selection; the picker keeps
     // the [1m] variant suffix that served-model strings sometimes drop.
@@ -166,7 +158,7 @@ function fmtResetDay(r) {
   return d.toLocaleDateString(undefined, { weekday: "short" });
 }
 
-const CTX_CAP_FALLBACK = 200000; // until the app learns the real window
+const CTX_CAP = 200000; // hard cap — the app-reported window (e.g. 1M) is ignored
 
 function bar(pct, short, title, high, suffix) {
   const p = Math.min(100, Math.max(0, pct));
@@ -182,10 +174,9 @@ function bar(pct, short, title, high, suffix) {
 
 function ctxBar() {
   if (state.used == null) return "";
-  const cap = state.cap || CTX_CAP_FALLBACK;
-  const pct = (state.used / cap) * 100;
+  const pct = (state.used / CTX_CAP) * 100;
   const title =
-    "Context " + fmtK(state.used) + " / " + fmtK(cap) + " · " + Math.round(pct) + "%";
+    "Context " + fmtK(state.used) + " / " + fmtK(CTX_CAP) + " · " + Math.round(pct) + "%";
   return bar(pct, "ctx", title, pct >= 90);
 }
 
@@ -215,7 +206,7 @@ function render() {
   el.title =
     "raw=" + cnt.raw + " ext=" + cnt.ext + " usg=" + cnt.usg + " req=" + cnt.req +
     " api=" + !!window.__ccVsc + " session=" + !!window.__ccActiveSession +
-    " used=" + state.used + " cap=" + state.cap + " model=" + state.model +
+    " used=" + state.used + " model=" + state.model +
     (state.rlError ? "\nusage error: " + state.rlError : "") + "\n" + types;
   el.querySelector(".cc-model").textContent = prettyModel(state.model);
   el.querySelector(".cc-bars").innerHTML =
