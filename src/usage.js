@@ -46,7 +46,7 @@ async function fetchUsage(reason) {
     state.fable = pickFable(rl);
     state.rlError = state.fable
       ? null
-      : "get_usage: no Fable window — model_scoped: " + JSON.stringify(rl.model_scoped ?? null);
+      : "get_usage: no Fable window — rate_limits: " + JSON.stringify(rl).slice(0, 400);
     saveRateLimits();
     scheduleRender();
   } catch (e) {
@@ -78,12 +78,19 @@ function pickWindow(w) {
   return { util, resets: w.resets_at ?? w.resetsAt ?? null };
 }
 
+// The Fable window's home varies by account/server version: a model_scoped
+// entry, an own key naming fable, or one of the newer plan-quota keys the
+// server sends that this extension version's own panel doesn't render yet.
+const FABLE_KEY_FALLBACKS = ["seven_day_overage_included", "extra_usage", "cinder_cove"];
+
 function pickFable(rl) {
   const scoped = Array.isArray(rl.model_scoped) ? rl.model_scoped : [];
-  const w =
-    scoped.find((o) => o && /fable/i.test(o.display_name || "")) ||
-    rl.seven_day_overage_included || // the plan-included "Fable 5 limit" window
-    null;
+  let w = scoped.find((o) => o && /fable/i.test(o.display_name || "")) || null;
+  if (!w) {
+    const k = Object.keys(rl).find((key) => /fable/i.test(key) && rl[key]);
+    if (k) w = rl[k];
+  }
+  if (!w) for (const k of FABLE_KEY_FALLBACKS) if (rl[k]) { w = rl[k]; break; }
   return pickWindow(w);
 }
 
