@@ -32,10 +32,16 @@ async function fetchUsage(reason) {
     dbg.lastUsageResponse = res;
     const rl = findRateLimits(res);
     if (!rl) {
-      // Show the actual response so the tooltip says WHY (error field,
-      // rate_limits_available:false, unexpected shape, …).
-      state.rlError = "get_usage: no rate_limits — " + JSON.stringify(res).slice(0, 400);
-      if (!usageFetchedOnce) scheduleUsageFetch(8000); // may just not be warm yet
+      // A session with no API traffic yet reports rate_limits:null — the CLI
+      // only learns limits from API response headers. Not an error: keep the
+      // persisted values, refetch after the next turn (busy watch) plus a
+      // slow retry.
+      const warmup = !!(res && res.usage && res.usage.rate_limits_available);
+      if (!warmup) {
+        dlog("get_usage response missing rate_limits:", res);
+        state.rlError = "get_usage: no rate_limits in response";
+      }
+      scheduleUsageFetch(30000);
       scheduleRender();
       return;
     }
@@ -43,16 +49,18 @@ async function fetchUsage(reason) {
     dbg.lastRateLimits = rl;
     state.five = pickWindow(rl.five_hour);
     state.week = pickWindow(rl.seven_day);
-    state.fable = pickFable(rl);
-    state.rlError = state.fable
-      ? null
-      : "get_usage: no Fable window — rate_limits: " + JSON.stringify(rl).slice(0, 400);
+    // The Fable window is only present in some responses (it comes and goes
+    // with recent Fable traffic in the session) — absence means "no update",
+    // not "no data": keep the last known value.
+    const fable = pickFable(rl);
+    if (fable) state.fable = fable;
+    state.rlError = null;
     saveRateLimits();
     scheduleRender();
   } catch (e) {
-    state.rlError = "get_usage failed: " + ((e && e.message) || e);
-    if (!usageFetchedOnce) scheduleUsageFetch(8000);
     dlog("get_usage failed (" + reason + "):", e);
+    state.rlError = "get_usage failed: " + ((e && e.message) || e);
+    scheduleUsageFetch(usageFetchedOnce ? 30000 : 8000);
     scheduleRender();
   }
 }

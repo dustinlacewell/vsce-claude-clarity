@@ -52,10 +52,15 @@ const ACTIVE_PATCHED_RE =
   /b\((\w+),\{usedTokens:\(window\.__ccActiveSession=e\)\.usageData\.value\.totalTokens/g;
 const ACTIVE_UNSUB = "b($1,{usedTokens:e.usageData.value.totalTokens";
 
-// Legacy: earlier shim versions also wrapped acquireVsCodeApi to get a
-// postMessage handle. No longer needed — strip it from patched installs.
+// Legacy: earlier shim versions also wrapped acquireVsCodeApi for a
+// postMessage handle (usage pokes, host-log diagnostics). No longer used —
+// strip every historical variant from patched installs.
 const API_ORIG = "let e=acquireVsCodeApi(),";
 const LEGACY_API_PATCHES = [
+  "let e=(window.__ccVsc=((a)=>({" +
+    "postMessage:(m)=>a.postMessage(m)," +
+    "setState:(s)=>a.setState(s),getState:()=>a.getState()" +
+    "}))(acquireVsCodeApi())),",
   "let e=(window.__ccVsc=((a)=>({" +
     "postMessage:(m)=>{try{window.__ccBadgeTx&&window.__ccBadgeTx(m)}catch(_){}return a.postMessage(m)}," +
     "setState:(s)=>a.setState(s),getState:()=>a.getState()" +
