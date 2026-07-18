@@ -2,7 +2,7 @@
 
 Puts the current model, context usage, and rate limits in the Claude Code VS Code extension's input row.
 
-<p align="center"><img src="screenshot.jpg" alt="screenshot"></p>
+<p align="center"><img src="preview.gif" alt="preview"></p>
 
 - **model · effort** — click the model name for a model × effort grid; click a cell to switch both at once (Ultra = the app's Ultracode toggle)
 - **ctx** — context tokens against the usable window, orange past 90%
