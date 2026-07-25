@@ -18,7 +18,8 @@
   "activationEvents": ["onStartupFinished"],
   "scripts": {
     "sync": "node sync.mjs",
-    "package": "node sync.mjs && vsce package --no-dependencies"
+    "build": "node sync.mjs && vsce package --no-dependencies",
+    "install-local": "npm run build && code --install-extension claude-clarity-0.1.0.vsix"
   },
   "contributes": {
     "commands": [

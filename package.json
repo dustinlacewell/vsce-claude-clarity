@@ -8,7 +8,9 @@
   },
   "scripts": {
     "apply": "node apply.mjs",
-    "remove": "node apply.mjs --remove"
+    "remove": "node apply.mjs --remove",
+    "ext:build": "npm --prefix ext run build",
+    "ext:install": "npm --prefix ext run install-local"
   },
   "author": "Dustin Lacewell",
   "license": "MIT",
