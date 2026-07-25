@@ -1,1 +1,8 @@
 node_modules/
+recording.mp4
+
+# Synced into ext/ at package time — the repo root holds the originals.
+ext/patch.mjs
+ext/LICENSE
+ext/src/
+ext/*.vsix

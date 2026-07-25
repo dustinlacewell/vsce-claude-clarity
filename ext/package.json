@@ -1,0 +1,49 @@
+{
+  "name": "claude-clarity",
+  "displayName": "Claude Clarity",
+  "description": "Adds a model / context / rate-limit badge and a model × effort picker to the Claude Code extension's input row",
+  "version": "0.1.0",
+  "publisher": "ldlework",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ldlework/vsce-claude-clarity"
+  },
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": ["Other"],
+  "extensionKind": ["ui"],
+  "main": "./extension.js",
+  "activationEvents": ["onStartupFinished"],
+  "scripts": {
+    "sync": "node sync.mjs",
+    "package": "node sync.mjs && vsce package --no-dependencies"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "claudeClarity.apply",
+        "title": "Claude Clarity: Apply Patch"
+      },
+      {
+        "command": "claudeClarity.remove",
+        "title": "Claude Clarity: Remove Patch"
+      },
+      {
+        "command": "claudeClarity.status",
+        "title": "Claude Clarity: Show Status"
+      }
+    ],
+    "configuration": {
+      "title": "Claude Clarity",
+      "properties": {
+        "claudeClarity.autoPatch": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically patch the Claude Code extension on startup and after it updates."
+        }
+      }
+    }
+  }
+}
