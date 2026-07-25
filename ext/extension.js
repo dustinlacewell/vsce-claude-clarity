@@ -46,8 +46,14 @@ function sleep(ms) {
 // On Windows, renaming onto a file that another process has open (an AV
 // scanner, an indexer, a still-loading webview) fails with EPERM — usually
 // for a moment, not forever. Retry briefly before giving up.
+//
+// Every open VS Code window runs its own copy of this extension against the
+// same shared extensions dir, so the temp path must be unique per writer —
+// otherwise two windows patching the same install race on one .cc-tmp file
+// and one's cleanup unlink can vanish the other's rename target (ENOENT).
+let tmpCounter = 0;
 async function writeBundle(bundle, contents) {
-  const tmp = bundle + ".cc-tmp";
+  const tmp = bundle + ".cc-tmp." + process.pid + "." + tmpCounter++;
   fs.writeFileSync(tmp, contents);
   const attempts = 5;
   for (let i = 1; i <= attempts; i++) {
