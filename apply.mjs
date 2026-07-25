@@ -52,6 +52,56 @@ const ACTIVE_PATCHED_RE =
   /b\((\w+),\{usedTokens:\(window\.__ccActiveSession=e\)\.usageData\.value\.totalTokens/g;
 const ACTIVE_UNSUB = "b($1,{usedTokens:e.usageData.value.totalTokens";
 
+// Anchors: the "share current selection with Claude" toggle. The composer
+// defaults it on and never clears it, so a selection keeps riding along on
+// every later message. Default it off, and reset it after each send so an
+// explicit toggle applies to exactly one message.
+//
+// The minified names are stable within a build but not across them, so both
+// patterns are matched structurally: the useState pair feeding
+// includeSelection, and the submit handler's read of it.
+const SELECTION_STATE_RE =
+  /includeSelection:(\w+),onToggleIncludeSelection:\(\)=>(\w+)\(\((\w+)\)=>!\3\)/;
+
+function patchSelectionToggle(src) {
+  const m = src.match(SELECTION_STATE_RE);
+  if (!m) return { src, ok: false };
+  const stateVar = m[1]; // includeSelection value
+  const setter = m[2]; // its setState
+
+  // 1) default off: `[C,y]=ne(!0)` → `[C,y]=ne(!1)`
+  const declRe = new RegExp(
+    "\\[" + stateVar + "," + setter + "\\]=(\\w+)\\(!0\\)"
+  );
+  if (!declRe.test(src)) return { src, ok: false };
+  src = src.replace(declRe, "[" + stateVar + "," + setter + "]=$1(!1)");
+
+  // 2) reset after send: the submit handler computes `ct=C&&!Re` then sends.
+  const useRe = new RegExp(
+    "(let (\\w+)=" + stateVar + "&&!(\\w+);)"
+  );
+  const um = src.match(useRe);
+  if (!um) return { src, ok: false };
+  src = src.replace(useRe, "$1" + setter + "(!1);");
+  return { src, ok: true };
+}
+
+// Undo both: restore the `!0` default and drop the injected reset call.
+function unpatchSelectionToggle(src) {
+  const m = src.match(SELECTION_STATE_RE);
+  if (!m) return src;
+  const stateVar = m[1];
+  const setter = m[2];
+  src = src.replace(
+    new RegExp("(let (\\w+)=" + stateVar + "&&!(\\w+);)" + setter + "\\(!1\\);"),
+    "$1"
+  );
+  return src.replace(
+    new RegExp("\\[" + stateVar + "," + setter + "\\]=(\\w+)\\(!1\\)(,\\[\\w+,\\w+\\]=\\w+\\(!1\\))"),
+    "[" + stateVar + "," + setter + "]=$1(!0)$2"
+  );
+}
+
 // Legacy: earlier shim versions also wrapped acquireVsCodeApi for a
 // postMessage handle (usage pokes, host-log diagnostics). No longer used —
 // strip every historical variant from patched installs.
@@ -73,10 +123,19 @@ function stripShim(src) {
   const blockRe = new RegExp(escapeRe(START) + "[\\s\\S]*?" + escapeRe(END));
   src = src.replace(blockRe, "").replace(/\s+$/, "");
   for (const p of LEGACY_API_PATCHES) src = src.split(p).join(API_ORIG);
+  src = unpatchSelectionToggle(src);
   return src.replace(ACTIVE_PATCHED_RE, ACTIVE_UNSUB);
 }
 
 function applyShim(src, extName) {
+  const sel = patchSelectionToggle(src);
+  src = sel.src;
+  if (!sel.ok)
+    console.warn(
+      "WARN " + extName + ": selection-toggle anchors not found — the share-" +
+      "selection button keeps the app's sticky default. The bundle layout likely changed."
+    );
+
   ACTIVE_RE.lastIndex = 0;
   if (ACTIVE_RE.test(src)) {
     ACTIVE_RE.lastIndex = 0;
