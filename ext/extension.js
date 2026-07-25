@@ -35,13 +35,36 @@ function log(msg) {
 
 // ------------------------------------------------------------------ patch ----
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 // Write through a temp file: a torn write to the bundle bricks Claude Code
 // until reinstall. The .orig backup is taken once, from the pristine source,
 // so restore always has a clean target even after repeated re-patching.
-function writeBundle(bundle, contents) {
+//
+// On Windows, renaming onto a file that another process has open (an AV
+// scanner, an indexer, a still-loading webview) fails with EPERM — usually
+// for a moment, not forever. Retry briefly before giving up.
+async function writeBundle(bundle, contents) {
   const tmp = bundle + ".cc-tmp";
   fs.writeFileSync(tmp, contents);
-  fs.renameSync(tmp, bundle);
+  const attempts = 5;
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      fs.renameSync(tmp, bundle);
+      return;
+    } catch (e) {
+      if (e.code !== "EPERM" && e.code !== "EBUSY") throw e;
+      if (i === attempts) {
+        try {
+          fs.unlinkSync(tmp);
+        } catch {}
+        throw e;
+      }
+      await sleep(200 * i);
+    }
+  }
 }
 
 function backupPath(bundle) {
@@ -56,7 +79,7 @@ async function patchInstall(inst, { remove = false } = {}) {
 
   if (remove) {
     if (!was) return { inst, action: "clean", misses: [] };
-    writeBundle(inst.bundle, stripped);
+    await writeBundle(inst.bundle, stripped);
     return { inst, action: "removed", misses: [] };
   }
 
@@ -67,10 +90,10 @@ async function patchInstall(inst, { remove = false } = {}) {
   const { src: patched, misses } = patch.applyShim(stripped, SRC_DIR());
   if (misses.length) {
     // Leave the bundle untouched rather than shipping a half-patched one.
-    if (was) writeBundle(inst.bundle, stripped);
+    if (was) await writeBundle(inst.bundle, stripped);
     return { inst, action: "failed", misses };
   }
-  writeBundle(inst.bundle, patched);
+  await writeBundle(inst.bundle, patched);
   return { inst, action: was ? "updated" : "patched", misses: [] };
 }
 
