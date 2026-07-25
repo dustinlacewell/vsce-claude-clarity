@@ -80,7 +80,7 @@ function popupName(row, current) {
   const el = document.createElement("div");
   el.className = "cc-p-name" + (row.family === current ? " cc-p-current" : "");
   el.textContent = prettyFamily(row.family);
-  el.title = prettyModel(row.entry.value) + " — click to switch model";
+  el.title = prettyModel(rowSlug(row)) + " — click to switch model";
   el.addEventListener("click", () => {
     applySelection(row, null);
     closePopup();

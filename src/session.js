@@ -34,19 +34,50 @@ function familyOf(slug) {
   return null;
 }
 
-// One grid row per family, preferring a plain entry over a [1m] variant.
+function labelOf(m) {
+  return String((m && (m.displayName || m.label)) || (m && m.value) || "");
+}
+
+// Rank a family's catalog entries. The current model is listed under a bare
+// alias with an unversioned label ("opus" / "Opus"); superseded ones carry an
+// explicit slug and a versioned label ("claude-opus-4-8" / "Opus 4.8"). So
+// the label — not the version digits in the slug — says which is current.
+// Among equals prefer the 1M variant, then catalog order.
+function entryScore(m, idx) {
+  const current = /\d/.test(labelOf(m).replace(/\(1m context\)/i, "")) ? 0 : 100;
+  const big = /\[1m\]/i.test(m.value) || /1m context/i.test(labelOf(m)) ? 10 : 0;
+  return current + big - idx * 0.01;
+}
+
+// One grid row per family: the catalog's current entry, 1M variant preferred.
 function modelRows(s) {
-  const rows = new Map();
-  const models = sessionModels(s);
-  for (const pass of [0, 1]) {
-    for (const m of models) {
-      if (!m || typeof m.value !== "string" || m.value === "default") continue;
-      if (pass === 0 && /\[1m\]/i.test(m.value)) continue;
-      const fam = familyOf(m.value);
-      if (fam && !rows.has(fam)) rows.set(fam, { family: fam, entry: m });
-    }
-  }
-  return MODEL_FAMILIES.filter((f) => rows.has(f)).map((f) => rows.get(f));
+  const best = new Map();
+  sessionModels(s).forEach((m, idx) => {
+    if (!m || typeof m.value !== "string" || m.value === "default" || m.disabled) return;
+    const fam = familyOf(m.value) || familyOf(labelOf(m));
+    if (!fam) return;
+    const score = entryScore(m, idx);
+    const prev = best.get(fam);
+    if (!prev || score > prev.score)
+      best.set(fam, { family: fam, value: m.value, entry: m, score });
+  });
+  return MODEL_FAMILIES.filter((f) => best.has(f)).map((f) => best.get(f));
+}
+
+// Catalog values are often aliases ("opus[1m]"); resolvedModel carries the
+// real slug ("claude-opus-5"). Prefer it for display and identity.
+function rowSlug(row) {
+  const resolved = row.entry && row.entry.resolvedModel;
+  if (!resolved) return row.value;
+  return /\[1m\]/i.test(row.value) && !/\[1m\]/i.test(resolved) ? resolved + "[1m]" : resolved;
+}
+
+// Is this row the model currently in use? Compare against both the row's
+// catalog value and its resolved slug, since state.model is what's serving.
+function isCurrentModel(row) {
+  const cur = String(state.model || "").toLowerCase();
+  if (!cur) return false;
+  return cur === String(row.value).toLowerCase() || cur === rowSlug(row).toLowerCase();
 }
 
 function rowEffortLevels(entry) {
@@ -73,9 +104,8 @@ async function applySelection(row, level) {
   const s = activeSession();
   if (!s) return;
   try {
-    const cur = String(state.model || "").replace(/\[1m\]$/i, "");
     let switched = false;
-    if (cur !== row.entry.value && typeof s.setModel === "function") {
+    if (!isCurrentModel(row) && typeof s.setModel === "function") {
       const ok = await s.setModel(row.entry);
       if (ok === false) return; // the app already showed its error notification
       switched = true;
@@ -87,7 +117,7 @@ async function applySelection(row, level) {
     if (switched && typeof s.insertMetaMessage === "function") {
       const eff = level === "ultra" ? "Ultracode" : level ? EFFORT_FULL[level] : null;
       s.insertMetaMessage(
-        "Switched to " + prettyModel(row.entry.value) + (eff ? " · " + eff + " effort" : "")
+        "Switched to " + prettyModel(rowSlug(row)) + (eff ? " · " + eff + " effort" : "")
       );
     }
   } catch (e) {
