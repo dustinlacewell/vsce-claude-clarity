@@ -9,6 +9,8 @@ Puts the current model, context usage, and rate limits in the Claude Code VS Cod
 - **5h** — session rate limit, with time until reset
 - **wk** — weekly rate limit, with reset day
 - **fb** — the model-scoped Fable weekly quota, with reset day
+- **no duplicate model button** — the app's own model switcher is hidden from the input row, since the badge's grid replaces it
+- **icon-only permission button** — the permission-mode button drops its text label and sits as a 26px icon like its neighbours; hover for the mode description
 - **share selection, one message at a time** — the "share current file/selection" button defaults off and resets to off right after each send, instead of the app's sticky-on default silently carrying a stale selection into later messages
 
 Hover any bar for exact numbers.
@@ -31,5 +33,5 @@ node apply.mjs --remove
 
 ## Layout
 
-- `apply.mjs` — the patcher: strips any previous shim, applies anchor patches (exposes the displayed session as `window.__ccActiveSession`; defaults the share-selection toggle off and resets it after each send), and appends the shim assembled from `src/`.
+- `apply.mjs` — the patcher: strips any previous shim, applies anchor patches (exposes the displayed session as `window.__ccActiveSession`; hides the app's model button; makes the permission-mode button icon-only; defaults the share-selection toggle off and resets it after each send), and appends the shim assembled from `src/`.
 - `src/` — the shim, concatenated into one IIFE: `debug` → `state` → `format` → `session` (session access, model catalog, setters) → `usage` (the `get_usage` fetch + push ingest) → `popup` (model × effort grid) → `badge` (DOM + render) → `main` (boot).

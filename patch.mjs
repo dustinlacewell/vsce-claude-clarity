@@ -101,6 +101,59 @@ function unpatchSelectionToggle(src) {
   );
 }
 
+// The app's own model button in the input footer. The badge's model × effort
+// grid replaces it, so hide it. Located structurally: the footer assigns the
+// button element to a local (`let e0=D(Q$0,{label:c,isOpen:W.isOpen,
+// onToggle:W.onToggle,buttonRef:F,...})`) and mounts it as `M!==2&&e0`
+// (M is the responsive fit stage). Prefix the mount with `!1&&` so the
+// element is never rendered; the dropdown component stays, unopened.
+const MODEL_BUTTON_DECL_RE = new RegExp(
+  `let (${ID})=${ID}\\(${ID},\\{label:${ID},isOpen:(${ID})\\.isOpen,onToggle:\\2\\.onToggle,buttonRef:`
+);
+
+function patchModelSwitcher(src) {
+  const m = src.match(MODEL_BUTTON_DECL_RE);
+  if (!m) return { src, ok: false };
+  const button = m[1];
+  const mountRe = new RegExp(`(${ID})!==2&&${escapeRe(button)},`);
+  if (!mountRe.test(src)) return { src, ok: false };
+  return { src: src.replace(mountRe, `!1&&$1!==2&&${button},`), ok: true };
+}
+
+function unpatchModelSwitcher(src) {
+  const m = src.match(MODEL_BUTTON_DECL_RE);
+  if (!m) return src;
+  const button = m[1];
+  return src.replace(
+    new RegExp(`!1&&(${ID})!==2&&${escapeRe(button)},`),
+    `$1!==2&&${button},`
+  );
+}
+
+// The permission-mode button renders icon + label
+// (`children:[X?M.iconV2Small:M.icon,D("span",{children:M.label})]`). Gate the
+// label with `!1&&` so the button is icon-only like its neighbours; the
+// tooltip still carries the mode description.
+const PERMISSION_LABEL_RE = new RegExp(
+  `(children:\\[${ID}\\?(${ID})\\.iconV2Small:\\2\\.icon,)(${ID}\\("span",\\{children:\\2\\.label\\}\\)\\])`
+);
+const PERMISSION_LABEL_PATCHED_RE = new RegExp(
+  `(children:\\[${ID}\\?(${ID})\\.iconV2Small:\\2\\.icon,)!1&&(${ID}\\("span",\\{children:\\2\\.label\\}\\)\\])`
+);
+
+function patchPermissionLabel(src) {
+  if (!PERMISSION_LABEL_RE.test(src)) return { src, ok: false };
+  return { src: src.replace(PERMISSION_LABEL_RE, "$1!1&&$3"), ok: true };
+}
+
+function unpatchPermissionLabel(src) {
+  return src.replace(PERMISSION_LABEL_PATCHED_RE, "$1$3");
+}
+
+function escapeRe(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 // Legacy: earlier shim versions also wrapped acquireVsCodeApi for a
 // postMessage handle (usage pokes, host-log diagnostics). No longer used —
 // strip every historical variant from patched installs.
@@ -124,11 +177,12 @@ export function isPatched(src) {
 }
 
 export function stripShim(src) {
-  const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const blockRe = new RegExp(escapeRe(START) + "[\\s\\S]*?" + escapeRe(END));
   src = src.replace(blockRe, "").replace(/\s+$/, "");
   for (const p of LEGACY_API_PATCHES) src = src.split(p).join(API_ORIG);
   src = unpatchSelectionToggle(src);
+  src = unpatchModelSwitcher(src);
+  src = unpatchPermissionLabel(src);
   return src.replace(ACTIVE_PATCHED_RE, ACTIVE_UNSUB);
 }
 
@@ -141,6 +195,14 @@ export function applyShim(src, srcDir) {
   const sel = patchSelectionToggle(src);
   src = sel.src;
   if (!sel.ok) misses.push("share-selection toggle");
+
+  const sw = patchModelSwitcher(src);
+  src = sw.src;
+  if (!sw.ok) misses.push("model switcher button");
+
+  const perm = patchPermissionLabel(src);
+  src = perm.src;
+  if (!perm.ok) misses.push("permission-mode button label");
 
   ACTIVE_RE.lastIndex = 0;
   if (ACTIVE_RE.test(src)) {

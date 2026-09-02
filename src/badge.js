@@ -89,7 +89,10 @@ const CSS_BADGE =
   "background:var(--app-input-border,#444);overflow:hidden}" +
   ".cc-badge .cc-fill{position:absolute;left:0;top:0;bottom:0;width:0;" +
   "background:var(--app-progressbar-background,#6b9bd1);transition:width .3s}" +
-  ".cc-badge .cc-fill-high{background:var(--app-claude-orange,#d97757)}";
+  ".cc-badge .cc-fill-high{background:var(--app-claude-orange,#d97757)}" +
+  // The permission-mode button is icon-only (label removed by the patch);
+  // drop the label's right padding so it is a 26px square like the menu button.
+  ".inputFooterV2_gGYT1w .footerButton_gGYT1w.footerButtonPrimary_gGYT1w{padding:0;width:26px}";
 
 function ensureStyle() {
   if (document.getElementById(STYLE_ID)) return;
