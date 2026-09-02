@@ -118,10 +118,13 @@ async function run(context, { remove = false, silent = false } = {}) {
     return;
   }
 
+  // Only the newest install is loaded by VS Code, so only it gets the shim.
+  // Older installs left on disk are stripped back to pristine: the anchors
+  // target the current bundle shape, so patching them would only report misses.
   const results = [];
-  for (const inst of installs) {
+  for (const [i, inst] of installs.entries()) {
     try {
-      results.push(await patchInstall(inst, { remove }));
+      results.push(await patchInstall(inst, { remove: remove || i > 0 }));
     } catch (e) {
       log("error patching " + inst.dir + ": " + (e && e.stack ? e.stack : e));
       results.push({ inst, action: "error", misses: [String(e && e.message ? e.message : e)] });

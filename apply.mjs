@@ -27,18 +27,23 @@ if (!installs.length) {
   process.exit(1);
 }
 
-for (const inst of installs) {
+// Only the newest install is loaded by VS Code, so only it gets the shim.
+// Older installs left on disk are stripped back to pristine: the anchors
+// target the current bundle shape, so patching them would only report misses.
+for (const [i, inst] of installs.entries()) {
   const orig = readFileSync(inst.bundle, "utf8");
   const had = isPatched(orig);
+  const strip = remove || i > 0;
   let src = stripShim(orig);
-  if (!remove) {
+  if (!strip) {
     const res = applyShim(src);
     src = res.src;
     for (const miss of res.misses)
       console.warn("WARN " + inst.dir + ": anchor missed — " + miss);
   }
   writeFileSync(inst.bundle, src);
-  console.log((remove ? "removed from" : had ? "updated" : "patched") + ": " + inst.dir);
+  const verb = strip ? (had ? "removed from" : "clean") : had ? "updated" : "patched";
+  console.log(verb + ": " + inst.dir + (i > 0 ? " (older install, not loaded)" : ""));
 }
 
 console.log(

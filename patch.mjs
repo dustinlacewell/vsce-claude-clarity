@@ -177,11 +177,11 @@ function unpatchRemoteLabel(src) {
 // call the /remote-control command makes. The component receives the session
 // as its `session` prop, so capture that local for the click handler.
 const REMOTE_LINK_RE = new RegExp(
-  `(\\{session:(${ID})\\}\\)\\{[\\s\\S]{0,400}?)href:(${ID}\\(${ID}\\.sessionUrl\\)),target:"_blank",rel:"noopener noreferrer",` +
+  `(\\{session:(${ID})\\}\\)\\{[\\s\\S]{0,700}?)href:(${ID}\\(${ID}\\.sessionUrl\\)),target:"_blank",rel:"noopener noreferrer",` +
   `("aria-label":"Remote Control",)title:"Remote Control is active · Click to open claude\\.ai/code · Run /remote-control to turn off"`
 );
 const REMOTE_LINK_PATCHED_RE = new RegExp(
-  `(\\{session:(${ID})\\}\\)\\{[\\s\\S]{0,400}?)href:!1&&(${ID}\\(${ID}\\.sessionUrl\\)),target:"_blank",rel:"noopener noreferrer",` +
+  `(\\{session:(${ID})\\}\\)\\{[\\s\\S]{0,700}?)href:!1&&(${ID}\\(${ID}\\.sessionUrl\\)),target:"_blank",rel:"noopener noreferrer",` +
   `onClick:\\(ev\\)=>\\{ev\\.preventDefault\\(\\);\\2\\.toggleRemoteControl\\(\\)\\},` +
   `("aria-label":"Remote Control",)title:"Remote Control is active · Click to turn off"`
 );
@@ -204,6 +204,54 @@ function unpatchRemoteLink(src) {
     REMOTE_LINK_PATCHED_RE,
     '$1href:$3,target:"_blank",rel:"noopener noreferrer",' +
       '$4title:"Remote Control is active · Click to open claude.ai/code · Run /remote-control to turn off"'
+  );
+}
+
+// Keep the Remote Control pill mounted while Remote Control is off, as a
+// neutral (no pillOn tint) toggle that turns it on. Two anchors:
+//  1) the footer only mounts the pill when status !== "disconnected" — gate
+//     that test with `!0||`, leaving the remoteControlAvailable check intact;
+//  2) the component returns null when disconnected — return the off pill
+//     instead, built from the same factories and classes the connected
+//     branch uses (captured from it).
+const REMOTE_MOUNT_RE = new RegExp(
+  `(${ID})\\.remoteControlState\\.value\\.status!=="disconnected"&&\\(\\1\\.remoteControlState\\.value\\.status==="connected"\\|\\|`
+);
+const REMOTE_MOUNT_PATCHED_RE = new RegExp(
+  `\\(!0\\|\\|(${ID})\\.remoteControlState\\.value\\.status!=="disconnected"\\)&&\\(\\1\\.remoteControlState\\.value\\.status==="connected"\\|\\|`
+);
+const REMOTE_OFF_RE = new RegExp(
+  `(\\{session:(${ID})\\}\\)\\{${ID}\\(\\);let (${ID})=\\2\\.remoteControlState\\.value;if\\(\\3\\.status==="disconnected"\\)return )null;` +
+    `(if\\(\\3\\.status==="connected"\\)return (${ID})\\("a",\\{className:\`\\$\\{(${ID})\\.pill\\} \\$\\{\\6\\.pillOn\\} \\$\\{\\6\\.pillLink\\}\`` +
+    `[\\s\\S]{0,600}?children:\\[(${ID})\\((${ID}),\\{\\}\\))`
+);
+const REMOTE_OFF_TITLE = "Remote Control is off · Click to turn on";
+const REMOTE_OFF_PATCHED_RE = new RegExp(
+  `if\\((${ID})\\.status==="disconnected"\\)return ${ID}\\("a",\\{className:\`\\$\\{${ID}\\.pill\\} \\$\\{${ID}\\.pillLink\\}\`,` +
+    `"aria-label":"Remote Control",title:"${REMOTE_OFF_TITLE}",` +
+    `onClick:\\(ev\\)=>\\{ev\\.preventDefault\\(\\);${ID}\\.toggleRemoteControl\\(\\)\\},children:\\[${ID}\\(${ID},\\{\\}\\)\\]\\}\\);`
+);
+
+function patchRemoteOff(src) {
+  if (!REMOTE_MOUNT_RE.test(src) || !REMOTE_OFF_RE.test(src)) return { src, ok: false };
+  src = src.replace(
+    REMOTE_MOUNT_RE,
+    '(!0||$1.remoteControlState.value.status!=="disconnected")&&($1.remoteControlState.value.status==="connected"||'
+  );
+  src = src.replace(
+    REMOTE_OFF_RE,
+    "$1$5(\"a\",{className:`${$6.pill} ${$6.pillLink}`," +
+      '"aria-label":"Remote Control",title:"' + REMOTE_OFF_TITLE + '",' +
+      "onClick:(ev)=>{ev.preventDefault();$2.toggleRemoteControl()},children:[$7($8,{})]});$4"
+  );
+  return { src, ok: true };
+}
+
+function unpatchRemoteOff(src) {
+  src = src.replace(REMOTE_OFF_PATCHED_RE, 'if($1.status==="disconnected")return null;');
+  return src.replace(
+    REMOTE_MOUNT_PATCHED_RE,
+    '$1.remoteControlState.value.status!=="disconnected"&&($1.remoteControlState.value.status==="connected"||'
   );
 }
 
@@ -240,6 +288,7 @@ export function stripShim(src) {
   src = unpatchSelectionToggle(src);
   src = unpatchModelSwitcher(src);
   src = unpatchPermissionLabel(src);
+  src = unpatchRemoteOff(src);
   src = unpatchRemoteLabel(src);
   src = unpatchRemoteLink(src);
   return src.replace(ACTIVE_PATCHED_RE, ACTIVE_UNSUB);
@@ -270,6 +319,10 @@ export function applyShim(src, srcDir) {
   const rl = patchRemoteLink(src);
   src = rl.src;
   if (!rl.ok) misses.push("remote-control pill link");
+
+  const ro = patchRemoteOff(src);
+  src = ro.src;
+  if (!ro.ok) misses.push("remote-control pill off state");
 
   ACTIVE_RE.lastIndex = 0;
   if (ACTIVE_RE.test(src)) {
