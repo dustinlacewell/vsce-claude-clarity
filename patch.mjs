@@ -150,6 +150,27 @@ function unpatchPermissionLabel(src) {
   return src.replace(PERMISSION_LABEL_PATCHED_RE, "$1$3");
 }
 
+// The Remote Control pill renders icon + `"Remote Control"` label in two
+// branches (connected link; connecting/error status). Gate both labels with
+// `!1&&` so the pill is icon-only; the shim CSS collapses its padding.
+const REMOTE_LABEL_RE = new RegExp(`(\\(${ID},\\{\\}\\),)(${ID}\\("span",\\{children:"Remote Control"\\}\\))`, "g");
+const REMOTE_LABEL_PATCHED_RE = new RegExp(
+  `(\\(${ID},\\{\\}\\),)!1&&(${ID}\\("span",\\{children:"Remote Control"\\}\\))`,
+  "g"
+);
+
+function patchRemoteLabel(src) {
+  REMOTE_LABEL_RE.lastIndex = 0;
+  if (!REMOTE_LABEL_RE.test(src)) return { src, ok: false };
+  REMOTE_LABEL_RE.lastIndex = 0;
+  return { src: src.replace(REMOTE_LABEL_RE, "$1!1&&$2"), ok: true };
+}
+
+function unpatchRemoteLabel(src) {
+  REMOTE_LABEL_PATCHED_RE.lastIndex = 0;
+  return src.replace(REMOTE_LABEL_PATCHED_RE, "$1$2");
+}
+
 function escapeRe(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -183,6 +204,7 @@ export function stripShim(src) {
   src = unpatchSelectionToggle(src);
   src = unpatchModelSwitcher(src);
   src = unpatchPermissionLabel(src);
+  src = unpatchRemoteLabel(src);
   return src.replace(ACTIVE_PATCHED_RE, ACTIVE_UNSUB);
 }
 
@@ -203,6 +225,10 @@ export function applyShim(src, srcDir) {
   const perm = patchPermissionLabel(src);
   src = perm.src;
   if (!perm.ok) misses.push("permission-mode button label");
+
+  const rc = patchRemoteLabel(src);
+  src = rc.src;
+  if (!rc.ok) misses.push("remote-control pill label");
 
   ACTIVE_RE.lastIndex = 0;
   if (ACTIVE_RE.test(src)) {

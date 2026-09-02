@@ -92,7 +92,11 @@ const CSS_BADGE =
   ".cc-badge .cc-fill-high{background:var(--app-claude-orange,#d97757)}" +
   // The permission-mode button is icon-only (label removed by the patch);
   // drop the label's right padding so it is a 26px square like the menu button.
-  ".inputFooterV2_gGYT1w .footerButton_gGYT1w.footerButtonPrimary_gGYT1w{padding:0;width:26px}";
+  ".inputFooterV2_gGYT1w .footerButton_gGYT1w.footerButtonPrimary_gGYT1w{padding:0;width:26px}" +
+  // The Remote Control pill is icon-only (label removed by the patch); the app
+  // only applies this collapsed form at narrow fit stages, so pin it always.
+  ".inputFooterV2_gGYT1w .pill_jamplw{padding:4px 0}" +
+  ".inputFooterV2_gGYT1w .pill_jamplw svg{display:block}";
 
 function ensureStyle() {
   if (document.getElementById(STYLE_ID)) return;
