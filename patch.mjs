@@ -171,6 +171,42 @@ function unpatchRemoteLabel(src) {
   return src.replace(REMOTE_LABEL_PATCHED_RE, "$1$2");
 }
 
+// The connected Remote Control pill is a link to claude.ai/code. Make it a
+// toggle instead: gate the href with `!1&&` (preact drops a false attribute)
+// and add an onClick that calls the session's toggleRemoteControl(), the same
+// call the /remote-control command makes. The component receives the session
+// as its `session` prop, so capture that local for the click handler.
+const REMOTE_LINK_RE = new RegExp(
+  `(\\{session:(${ID})\\}\\)\\{[\\s\\S]{0,400}?)href:(${ID}\\(${ID}\\.sessionUrl\\)),target:"_blank",rel:"noopener noreferrer",` +
+  `("aria-label":"Remote Control",)title:"Remote Control is active · Click to open claude\\.ai/code · Run /remote-control to turn off"`
+);
+const REMOTE_LINK_PATCHED_RE = new RegExp(
+  `(\\{session:(${ID})\\}\\)\\{[\\s\\S]{0,400}?)href:!1&&(${ID}\\(${ID}\\.sessionUrl\\)),target:"_blank",rel:"noopener noreferrer",` +
+  `onClick:\\(ev\\)=>\\{ev\\.preventDefault\\(\\);\\2\\.toggleRemoteControl\\(\\)\\},` +
+  `("aria-label":"Remote Control",)title:"Remote Control is active · Click to turn off"`
+);
+
+function patchRemoteLink(src) {
+  if (!REMOTE_LINK_RE.test(src)) return { src, ok: false };
+  return {
+    src: src.replace(
+      REMOTE_LINK_RE,
+      '$1href:!1&&$3,target:"_blank",rel:"noopener noreferrer",' +
+        "onClick:(ev)=>{ev.preventDefault();$2.toggleRemoteControl()}," +
+        '$4title:"Remote Control is active · Click to turn off"'
+    ),
+    ok: true,
+  };
+}
+
+function unpatchRemoteLink(src) {
+  return src.replace(
+    REMOTE_LINK_PATCHED_RE,
+    '$1href:$3,target:"_blank",rel:"noopener noreferrer",' +
+      '$4title:"Remote Control is active · Click to open claude.ai/code · Run /remote-control to turn off"'
+  );
+}
+
 function escapeRe(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -205,6 +241,7 @@ export function stripShim(src) {
   src = unpatchModelSwitcher(src);
   src = unpatchPermissionLabel(src);
   src = unpatchRemoteLabel(src);
+  src = unpatchRemoteLink(src);
   return src.replace(ACTIVE_PATCHED_RE, ACTIVE_UNSUB);
 }
 
@@ -229,6 +266,10 @@ export function applyShim(src, srcDir) {
   const rc = patchRemoteLabel(src);
   src = rc.src;
   if (!rc.ok) misses.push("remote-control pill label");
+
+  const rl = patchRemoteLink(src);
+  src = rl.src;
+  if (!rl.ok) misses.push("remote-control pill link");
 
   ACTIVE_RE.lastIndex = 0;
   if (ACTIVE_RE.test(src)) {
