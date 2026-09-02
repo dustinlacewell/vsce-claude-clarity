@@ -38,13 +38,21 @@ export function buildShim(srcDir = join(here, "src")) {
 
 // The input footer's render reads the session's usageData for the app's own
 // context pie — tap that expression so the displayed session lands in
-// window.__ccActiveSession. The regex tolerates the minified component name
-// changing between extension versions.
-const ACTIVE_RE = /b\((\w+),\{usedTokens:e\.usageData\.value\.totalTokens/g;
-const ACTIVE_SUB = "b($1,{usedTokens:(window.__ccActiveSession=e).usageData.value.totalTokens";
-const ACTIVE_PATCHED_RE =
-  /b\((\w+),\{usedTokens:\(window\.__ccActiveSession=e\)\.usageData\.value\.totalTokens/g;
-const ACTIVE_UNSUB = "b($1,{usedTokens:e.usageData.value.totalTokens";
+// window.__ccActiveSession. The regex tolerates the minified names of the JSX
+// factory, the component, and the session variable changing between extension
+// versions (2.1.241: `b(Rlt,{usedTokens:e.` — 2.1.257: `D(A$0,{usedTokens:$.`).
+// Minified identifiers may be `$`, which `\w` does not match.
+const ID = "[\\w$]+";
+const ACTIVE_RE = new RegExp(
+  `(${ID})\\((${ID}),\\{usedTokens:(${ID})\\.usageData\\.value\\.totalTokens`,
+  "g"
+);
+const ACTIVE_SUB = "$1($2,{usedTokens:(window.__ccActiveSession=$3).usageData.value.totalTokens";
+const ACTIVE_PATCHED_RE = new RegExp(
+  `(${ID})\\((${ID}),\\{usedTokens:\\(window\\.__ccActiveSession=(${ID})\\)\\.usageData\\.value\\.totalTokens`,
+  "g"
+);
+const ACTIVE_UNSUB = "$1($2,{usedTokens:$3.usageData.value.totalTokens";
 
 // The "share current selection with Claude" toggle. The composer defaults it
 // on and never clears it, so a selection keeps riding along on every later
