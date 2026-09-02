@@ -9,6 +9,7 @@ Puts the current model, context usage, and rate limits in the Claude Code VS Cod
 - **5h** — session rate limit, with time until reset
 - **wk** — weekly rate limit, with reset day
 - **fb** — the model-scoped Fable weekly quota, with reset day
+- **no command menu button** — the `/` button is hidden; typing `/` opens the same menu
 - **no duplicate model button** — the app's own model switcher is hidden from the input row, since the badge's grid replaces it
 - **icon-only permission button** — the permission-mode button drops its text label and sits as a 26px icon like its neighbours; hover for the mode description
 - **Remote Control pill toggles** — the pill is always in the row, icon-only, neutral when off and tinted when on; clicking it toggles Remote Control (same as `/remote-control`) instead of opening claude.ai/code; hover for the status
@@ -34,5 +35,5 @@ node apply.mjs --remove
 
 ## Layout
 
-- `apply.mjs` — the patcher: strips any previous shim, applies anchor patches (exposes the displayed session as `window.__ccActiveSession`; hides the app's model button; makes the permission-mode button and Remote Control pill icon-only; defaults the share-selection toggle off and resets it after each send), and appends the shim assembled from `src/`.
+- `apply.mjs` — the patcher: strips any previous shim, applies anchor patches (exposes the displayed session as `window.__ccActiveSession`; hides the app's command menu and model buttons; makes the permission-mode button and Remote Control pill icon-only; defaults the share-selection toggle off and resets it after each send), and appends the shim assembled from `src/`.
 - `src/` — the shim, concatenated into one IIFE: `debug` → `state` → `format` → `session` (session access, model catalog, setters) → `usage` (the `get_usage` fetch + push ingest) → `popup` (model × effort grid) → `badge` (DOM + render) → `main` (boot).

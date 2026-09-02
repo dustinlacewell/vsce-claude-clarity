@@ -255,6 +255,24 @@ function unpatchRemoteOff(src) {
   );
 }
 
+// The footer's "Show command menu (/)" button. Typing `/` opens the same menu,
+// so hide the button with `!1&&`.
+const MENU_BUTTON_RE = new RegExp(
+  `,(${ID}\\("button",\\{type:"button",className:${ID}\\.menuButton,title:"Show command menu \\(/\\)",)`
+);
+const MENU_BUTTON_PATCHED_RE = new RegExp(
+  `,!1&&(${ID}\\("button",\\{type:"button",className:${ID}\\.menuButton,title:"Show command menu \\(/\\)",)`
+);
+
+function patchMenuButton(src) {
+  if (!MENU_BUTTON_RE.test(src)) return { src, ok: false };
+  return { src: src.replace(MENU_BUTTON_RE, ",!1&&$1"), ok: true };
+}
+
+function unpatchMenuButton(src) {
+  return src.replace(MENU_BUTTON_PATCHED_RE, ",$1");
+}
+
 function escapeRe(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -288,6 +306,7 @@ export function stripShim(src) {
   src = unpatchSelectionToggle(src);
   src = unpatchModelSwitcher(src);
   src = unpatchPermissionLabel(src);
+  src = unpatchMenuButton(src);
   src = unpatchRemoteOff(src);
   src = unpatchRemoteLabel(src);
   src = unpatchRemoteLink(src);
@@ -323,6 +342,10 @@ export function applyShim(src, srcDir) {
   const ro = patchRemoteOff(src);
   src = ro.src;
   if (!ro.ok) misses.push("remote-control pill off state");
+
+  const mb = patchMenuButton(src);
+  src = mb.src;
+  if (!mb.ok) misses.push("command menu button");
 
   ACTIVE_RE.lastIndex = 0;
   if (ACTIVE_RE.test(src)) {
