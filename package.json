@@ -1,6 +1,6 @@
 {
   "name": "vsce-claude-clarity",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Show model, context, and rate-limit bars in the Claude Code VS Code extension's input row",
   "type": "module",
   "bin": {
