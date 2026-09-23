@@ -54,79 +54,70 @@ const ACTIVE_PATCHED_RE = new RegExp(
 );
 const ACTIVE_UNSUB = "$1($2,{usedTokens:$3.usageData.value.totalTokens";
 
-// The "share current selection with Claude" toggle. The composer defaults it
-// on and never clears it, so a selection keeps riding along on every later
-// message. Default it off, and reset it after each send so an explicit toggle
-// applies to exactly one message.
-//
-// Minified names are stable within a build but not across them, so both edits
-// are located structurally: the useState pair feeding includeSelection, and
-// the submit handler's read of it.
-const SELECTION_STATE_RE =
-  /includeSelection:(\w+),onToggleIncludeSelection:\(\)=>(\w+)\(\((\w+)\)=>!\3\)/;
+// The footer's selection chip renders icon + label ("12 lines selected" or the
+// file name) inside a span that already carries the full text as its title
+// (`title:\`Showing Claude your current file selection (${Z})\`,
+// children:[F(QB0,{}),F("span",{children:Z})]`), followed by the X dismiss
+// button. Gate the label with `!1&&` so the chip is icon-only; the tooltip
+// keeps the text and the X still dismisses.
+const SELECTION_CHIP_RE = new RegExp(
+  `(title:\`Showing Claude your current file selection \\(\\$\\{(${ID})\\}\\)\`,children:\\[${ID}\\(${ID},\\{\\}\\),)` +
+    `(${ID}\\("span",\\{children:\\2\\}\\)\\])`
+);
+const SELECTION_CHIP_PATCHED_RE = new RegExp(
+  `(title:\`Showing Claude your current file selection \\(\\$\\{(${ID})\\}\\)\`,children:\\[${ID}\\(${ID},\\{\\}\\),)!1&&` +
+    `(${ID}\\("span",\\{children:\\2\\}\\)\\])`
+);
 
-function patchSelectionToggle(src) {
-  const m = src.match(SELECTION_STATE_RE);
-  if (!m) return { src, ok: false };
-  const stateVar = m[1]; // includeSelection value
-  const setter = m[2]; // its setState
-
-  // 1) default off: `[C,y]=ne(!0)` → `[C,y]=ne(!1)`
-  const declRe = new RegExp("\\[" + stateVar + "," + setter + "\\]=(\\w+)\\(!0\\)");
-  if (!declRe.test(src)) return { src, ok: false };
-  src = src.replace(declRe, "[" + stateVar + "," + setter + "]=$1(!1)");
-
-  // 2) reset after send: the submit handler computes `ct=C&&!Re` then sends.
-  const useRe = new RegExp("(let (\\w+)=" + stateVar + "&&!(\\w+);)");
-  if (!useRe.test(src)) return { src, ok: false };
-  src = src.replace(useRe, "$1" + setter + "(!1);");
-  return { src, ok: true };
+function patchSelectionChip(src) {
+  if (!SELECTION_CHIP_RE.test(src)) return { src, ok: false };
+  return { src: src.replace(SELECTION_CHIP_RE, "$1!1&&$3"), ok: true };
 }
 
-// Undo both: restore the `!0` default and drop the injected reset call.
-function unpatchSelectionToggle(src) {
-  const m = src.match(SELECTION_STATE_RE);
-  if (!m) return src;
-  const stateVar = m[1];
-  const setter = m[2];
-  src = src.replace(
-    new RegExp("(let (\\w+)=" + stateVar + "&&!(\\w+);)" + setter + "\\(!1\\);"),
-    "$1"
-  );
-  return src.replace(
-    new RegExp(
-      "\\[" + stateVar + "," + setter + "\\]=(\\w+)\\(!1\\)(,\\[\\w+,\\w+\\]=\\w+\\(!1\\))"
-    ),
-    "[" + stateVar + "," + setter + "]=$1(!0)$2"
-  );
+function unpatchSelectionChip(src) {
+  return src.replace(SELECTION_CHIP_PATCHED_RE, "$1$3");
 }
 
-// The app's own model button in the input footer. The badge's model × effort
-// grid replaces it, so hide it. Located structurally: the footer assigns the
-// button element to a local (`let e0=D(Q$0,{label:c,isOpen:W.isOpen,
-// onToggle:W.onToggle,buttonRef:F,...})`) and mounts it as `M!==2&&e0`
-// (M is the responsive fit stage). Prefix the mount with `!1&&` so the
-// element is never rendered; the dropdown component stays, unopened.
-const MODEL_BUTTON_DECL_RE = new RegExp(
-  `let (${ID})=${ID}\\(${ID},\\{label:${ID},isOpen:(${ID})\\.isOpen,onToggle:\\2\\.onToggle,buttonRef:`
+// The app's own model button in the input footer. The badge's model x effort
+// grid replaces it, so hide it. Located structurally: the footer builds a
+// shared props object (`let H0={label:r,effort:a,isOpen:B.isOpen,
+// onToggle:()=>{...;B.onToggle()},buttonRef:K,...}`) and spreads it into the
+// button component at two responsive fit stages: inline
+// (`j!==2&&F(mA1,{...H0})`) and, at the narrow stage, its own row below the
+// input (`j===2&&F("div",{className:...,children:F(mA1,{...H0,ownRow:!0})})`).
+// Prefix both mounts with `!1&&` so neither renders; the dropdown component
+// stays, unopened.
+const MODEL_PROPS_DECL_RE = new RegExp(
+  `let (${ID})=\\{label:${ID},effort:${ID},isOpen:${ID}\\.isOpen,onToggle:`
 );
 
 function patchModelSwitcher(src) {
-  const m = src.match(MODEL_BUTTON_DECL_RE);
+  const m = src.match(MODEL_PROPS_DECL_RE);
   if (!m) return { src, ok: false };
-  const button = m[1];
-  const mountRe = new RegExp(`(${ID})!==2&&${escapeRe(button)},`);
-  if (!mountRe.test(src)) return { src, ok: false };
-  return { src: src.replace(mountRe, `!1&&$1!==2&&${button},`), ok: true };
+  const props = m[1];
+  const inlineRe = new RegExp(`(${ID})!==2&&(${ID}\\(${ID},\\{\\.\\.\\.${escapeRe(props)}\\}\\))`);
+  const rowRe = new RegExp(
+    `(${ID})===2&&(${ID}\\("div",\\{[\\s\\S]{0,80}?children:${ID}\\(${ID},\\{\\.\\.\\.${escapeRe(props)},ownRow:!0\\}\\)\\})`
+  );
+  if (!inlineRe.test(src) || !rowRe.test(src)) return { src, ok: false };
+  src = src.replace(inlineRe, `!1&&$1!==2&&$2`);
+  src = src.replace(rowRe, `!1&&$1===2&&$2`);
+  return { src, ok: true };
 }
 
 function unpatchModelSwitcher(src) {
-  const m = src.match(MODEL_BUTTON_DECL_RE);
+  const m = src.match(MODEL_PROPS_DECL_RE);
   if (!m) return src;
-  const button = m[1];
+  const props = m[1];
+  src = src.replace(
+    new RegExp(`!1&&(${ID})!==2&&(${ID}\\(${ID},\\{\\.\\.\\.${escapeRe(props)}\\}\\))`),
+    `$1!==2&&$2`
+  );
   return src.replace(
-    new RegExp(`!1&&(${ID})!==2&&${escapeRe(button)},`),
-    `$1!==2&&${button},`
+    new RegExp(
+      `!1&&(${ID})===2&&(${ID}\\("div",\\{[\\s\\S]{0,80}?children:${ID}\\(${ID},\\{\\.\\.\\.${escapeRe(props)},ownRow:!0\\}\\)\\})`
+    ),
+    `$1===2&&$2`
   );
 }
 
@@ -213,7 +204,9 @@ function unpatchRemoteLink(src) {
 //     that test with `!0||`, leaving the remoteControlAvailable check intact;
 //  2) the component returns null when disconnected — return the off pill
 //     instead, built from the same factories and classes the connected
-//     branch uses (captured from it).
+//     branch uses (captured from it). Between the two branches the
+//     component declares its click logger (`let Z=()=>$.logEvent(...)`);
+//     the off pill returns before that line, so it does not use it.
 const REMOTE_MOUNT_RE = new RegExp(
   `(${ID})\\.remoteControlState\\.value\\.status!=="disconnected"&&\\(\\1\\.remoteControlState\\.value\\.status==="connected"\\|\\|`
 );
@@ -222,7 +215,8 @@ const REMOTE_MOUNT_PATCHED_RE = new RegExp(
 );
 const REMOTE_OFF_RE = new RegExp(
   `(\\{session:(${ID})\\}\\)\\{${ID}\\(\\);let (${ID})=\\2\\.remoteControlState\\.value;if\\(\\3\\.status==="disconnected"\\)return )null;` +
-    `(if\\(\\3\\.status==="connected"\\)return (${ID})\\("a",\\{className:\`\\$\\{(${ID})\\.pill\\} \\$\\{\\6\\.pillOn\\} \\$\\{\\6\\.pillLink\\}\`` +
+    `(let ${ID}=\\(\\)=>\\2\\.logEvent\\([^;]{0,120}\\);` +
+    `if\\(\\3\\.status==="connected"\\)return (${ID})\\("a",\\{className:\`\\$\\{(${ID})\\.pill\\} \\$\\{\\6\\.pillOn\\} \\$\\{\\6\\.pillLink\\}\`` +
     `[\\s\\S]{0,600}?children:\\[(${ID})\\((${ID}),\\{\\}\\))`
 );
 const REMOTE_OFF_TITLE = "Remote Control is off · Click to turn on";
@@ -273,6 +267,45 @@ function unpatchMenuButton(src) {
   return src.replace(MENU_BUTTON_PATCHED_RE, ",$1");
 }
 
+// The footer's agent-map pill (`function b$5({count:$,dot:J,onOpen:Z})`)
+// renders an icon span, a status dot, and an "N agents" label span. The
+// bundle's CSS shows the label only at fit stage 0; at stages 1 and 2 it hides
+// the label and shows the icon (26px, negative margin, so it sits off the
+// footer's baseline). The footer mounts the pill whenever the agent map has any
+// entry, but `count` holds only the active agents, so the pill can show 0.
+// Patch: return null when count is 0; gate the icon and label spans with
+// `!1&&`; append a class-less span with the bare count, which no fit-stage rule
+// hides. The dot, click handler, title and aria-label stay. The shim CSS
+// (src/badge.js) restores the pill's padding, which the app zeroes at narrow
+// stages for the icon.
+const AGENTS_PILL_BODY =
+  `(let (${ID})=${ID}\\(\\2\\),${ID}=${ID}\\(${ID}\\);return ${ID}\\("button",\\{type:"button",` +
+  `className:\`\\$\\{${ID}\\.modelPill\\} \\$\\{(${ID})\\.agentsPill\\}\`,[\\s\\S]{0,120}?children:\\[)`;
+const AGENTS_PILL_ICON = `(${ID}\\("span",\\{className:\\5\\.icon,children:${ID}\\(${ID},\\{\\}\\)\\}\\),)`;
+const AGENTS_PILL_DOT = `(${ID}\\(${ID},\\{state:${ID},className:\\5\\.dot\\}\\),)`;
+const AGENTS_PILL_LABEL = `((${ID})\\("span",\\{className:\\5\\.label,children:\\4\\}\\))`;
+const AGENTS_PILL_RE = new RegExp(
+  `(\\{count:(${ID}),dot:${ID},onOpen:${ID}\\}\\)\\{)` +
+    AGENTS_PILL_BODY + AGENTS_PILL_ICON + AGENTS_PILL_DOT + AGENTS_PILL_LABEL
+);
+const AGENTS_PILL_PATCHED_RE = new RegExp(
+  `(\\{count:(${ID}),dot:${ID},onOpen:${ID}\\}\\)\\{)if\\(!\\2\\)return null;` +
+    AGENTS_PILL_BODY + "!1&&" + AGENTS_PILL_ICON + AGENTS_PILL_DOT + "!1&&" + AGENTS_PILL_LABEL +
+    `,\\9\\("span",\\{children:\\2\\}\\)`
+);
+
+function patchAgentsPill(src) {
+  if (!AGENTS_PILL_RE.test(src)) return { src, ok: false };
+  return {
+    src: src.replace(AGENTS_PILL_RE, '$1if(!$2)return null;$3!1&&$6$7!1&&$8,$9("span",{children:$2})'),
+    ok: true,
+  };
+}
+
+function unpatchAgentsPill(src) {
+  return src.replace(AGENTS_PILL_PATCHED_RE, "$1$3$6$7$8");
+}
+
 function escapeRe(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -303,10 +336,11 @@ export function stripShim(src) {
   const blockRe = new RegExp(escapeRe(START) + "[\\s\\S]*?" + escapeRe(END));
   src = src.replace(blockRe, "").replace(/\s+$/, "");
   for (const p of LEGACY_API_PATCHES) src = src.split(p).join(API_ORIG);
-  src = unpatchSelectionToggle(src);
+  src = unpatchSelectionChip(src);
   src = unpatchModelSwitcher(src);
   src = unpatchPermissionLabel(src);
   src = unpatchMenuButton(src);
+  src = unpatchAgentsPill(src);
   src = unpatchRemoteOff(src);
   src = unpatchRemoteLabel(src);
   src = unpatchRemoteLink(src);
@@ -319,9 +353,9 @@ export function stripShim(src) {
 export function applyShim(src, srcDir) {
   const misses = [];
 
-  const sel = patchSelectionToggle(src);
+  const sel = patchSelectionChip(src);
   src = sel.src;
-  if (!sel.ok) misses.push("share-selection toggle");
+  if (!sel.ok) misses.push("selection chip icon");
 
   const sw = patchModelSwitcher(src);
   src = sw.src;
@@ -346,6 +380,10 @@ export function applyShim(src, srcDir) {
   const mb = patchMenuButton(src);
   src = mb.src;
   if (!mb.ok) misses.push("command menu button");
+
+  const ap = patchAgentsPill(src);
+  src = ap.src;
+  if (!ap.ok) misses.push("agent map count");
 
   ACTIVE_RE.lastIndex = 0;
   if (ACTIVE_RE.test(src)) {

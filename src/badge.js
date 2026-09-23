@@ -96,7 +96,11 @@ const CSS_BADGE =
   // The Remote Control pill is icon-only (label removed by the patch); the app
   // only applies this collapsed form at narrow fit stages, so pin it always.
   ".inputFooterV2_gGYT1w .pill_jamplw{padding:4px 0}" +
-  ".inputFooterV2_gGYT1w .pill_jamplw svg{display:block}";
+  ".inputFooterV2_gGYT1w .pill_jamplw svg{display:block}" +
+  // The agent-map pill shows dot + count (icon and label removed by the
+  // patch); the app zeroes its padding at narrow fit stages, sized for the
+  // icon. Pad it to the Remote Control pill's 26px height at every stage.
+  ".inputFooterV2_gGYT1w .agentsPill_EGyesg{padding:4px 8px}";
 
 function ensureStyle() {
   if (document.getElementById(STYLE_ID)) return;
