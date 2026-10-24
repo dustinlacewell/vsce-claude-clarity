@@ -100,7 +100,10 @@ const CSS_BADGE =
   // The agent-map pill shows dot + count (icon and label removed by the
   // patch); the app zeroes its padding at narrow fit stages, sized for the
   // icon. Pad it to the Remote Control pill's 26px height at every stage.
-  ".inputFooterV2_gGYT1w .agentsPill_EGyesg{padding:4px 8px}";
+  ".inputFooterV2_gGYT1w .agentsPill_EGyesg{padding:4px 8px}" +
+  // The selection chip toggles sharing (src/selection.js); dim it while off.
+  ".inputFooterV2_gGYT1w [data-cc-share]{cursor:pointer}" +
+  '.inputFooterV2_gGYT1w [data-cc-share="off"]{opacity:.45}';
 
 function ensureStyle() {
   if (document.getElementById(STYLE_ID)) return;

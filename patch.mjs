@@ -24,6 +24,7 @@ const SRC_ORDER = [
   "usage.js",
   "popup.js",
   "badge.js",
+  "selection.js",
   "main.js",
 ];
 
@@ -54,41 +55,63 @@ const ACTIVE_PATCHED_RE = new RegExp(
 );
 const ACTIVE_UNSUB = "$1($2,{usedTokens:$3.usageData.value.totalTokens";
 
-// The footer's selection chip renders icon + label ("12 lines selected" or the
-// file name) inside a span that already carries the full text as its title
+// Selection sharing, off by default. The app shares the editor selection (or
+// the open file) with every message that is not a slash command; the session
+// itself sends a given selection only once (`lastSentSelection`). The footer
+// shows it as a chip: a span titled with the full text
 // (`title:\`Showing Claude your current file selection (${Z})\`,
-// children:[F(QB0,{}),F("span",{children:Z})]`), followed by the X dismiss
-// button. Gate the label with `!1&&` so the chip is icon-only; the tooltip
-// keeps the text and the X still dismisses.
+// children:[F(QB0,{}),F("span",{children:Z})]`), then the X dismiss button.
+//
+// The on/off flag is `window.__ccShareSel`, owned by the shim (src/selection.js).
+// It is global rather than per-session: it is a UI preference, and neither the
+// chip nor the submit handler share a closer scope. It stays as the user sets
+// it; the app's own dedupe already keeps one selection from riding along twice.
+// Two edits, both required:
+//  1) the chip: gate the label with `!1&&` (icon-only), and spread the shim's
+//     props after the title (`...window.__ccSelChip?.(Z)`: data-cc-share,
+//     a state-aware title, and a click that toggles the flag). The `?.` covers
+//     a render before the shim's IIFE runs. The X still dismisses.
+//  2) the submit handler computes the send's include-selection flag as
+//     `let Z5=!T0;` (T0: slash command) and passes it to the logger and send —
+//     AND it with the shim flag.
 const SELECTION_CHIP_RE = new RegExp(
-  `(title:\`Showing Claude your current file selection \\(\\$\\{(${ID})\\}\\)\`,children:\\[${ID}\\(${ID},\\{\\}\\),)` +
+  `(title:\`Showing Claude your current file selection \\(\\$\\{(${ID})\\}\\)\`,)(children:\\[${ID}\\(${ID},\\{\\}\\),)` +
     `(${ID}\\("span",\\{children:\\2\\}\\)\\])`
 );
 const SELECTION_CHIP_PATCHED_RE = new RegExp(
-  `(title:\`Showing Claude your current file selection \\(\\$\\{(${ID})\\}\\)\`,children:\\[${ID}\\(${ID},\\{\\}\\),)!1&&` +
-    `(${ID}\\("span",\\{children:\\2\\}\\)\\])`
+  `(title:\`Showing Claude your current file selection \\(\\$\\{(${ID})\\}\\)\`,)\\.\\.\\.window\\.__ccSelChip\\?\\.\\(\\2\\),` +
+    `(children:\\[${ID}\\(${ID},\\{\\}\\),)!1&&(${ID}\\("span",\\{children:\\2\\}\\)\\])`
+);
+const SELECTION_SEND_RE = new RegExp(
+  `let (${ID})=!(${ID});(${ID}\\(${ID}\\.selection\\.value,\\1,)`
+);
+const SELECTION_SEND_PATCHED_RE = new RegExp(
+  `let (${ID})=!(${ID})&&window\\.__ccShareSel===!0;(${ID}\\(${ID}\\.selection\\.value,\\1,)`
 );
 
-function patchSelectionChip(src) {
-  if (!SELECTION_CHIP_RE.test(src)) return { src, ok: false };
-  return { src: src.replace(SELECTION_CHIP_RE, "$1!1&&$3"), ok: true };
+function patchSelectionShare(src) {
+  if (!SELECTION_CHIP_RE.test(src) || !SELECTION_SEND_RE.test(src)) return { src, ok: false };
+  src = src.replace(SELECTION_CHIP_RE, "$1...window.__ccSelChip?.($2),$3!1&&$4");
+  src = src.replace(SELECTION_SEND_RE, "let $1=!$2&&window.__ccShareSel===!0;$3");
+  return { src, ok: true };
 }
 
-function unpatchSelectionChip(src) {
-  return src.replace(SELECTION_CHIP_PATCHED_RE, "$1$3");
+function unpatchSelectionShare(src) {
+  src = src.replace(SELECTION_SEND_PATCHED_RE, "let $1=!$2;$3");
+  return src.replace(SELECTION_CHIP_PATCHED_RE, "$1$3$4");
 }
 
 // The app's own model button in the input footer. The badge's model x effort
 // grid replaces it, so hide it. Located structurally: the footer builds a
-// shared props object (`let H0={label:r,effort:a,isOpen:B.isOpen,
+// shared props object (`let z0={label:c,effort:t,ultracode:g,isOpen:B.isOpen,
 // onToggle:()=>{...;B.onToggle()},buttonRef:K,...}`) and spreads it into the
 // button component at two responsive fit stages: inline
-// (`j!==2&&F(mA1,{...H0})`) and, at the narrow stage, its own row below the
-// input (`j===2&&F("div",{className:...,children:F(mA1,{...H0,ownRow:!0})})`).
+// (`j!==2&&F(Ib1,{...z0})`) and, at the narrow stage, its own row below the
+// input (`j===2&&F("div",{className:...,children:F(Ib1,{...z0,ownRow:!0})})`).
 // Prefix both mounts with `!1&&` so neither renders; the dropdown component
 // stays, unopened.
 const MODEL_PROPS_DECL_RE = new RegExp(
-  `let (${ID})=\\{label:${ID},effort:${ID},isOpen:${ID}\\.isOpen,onToggle:`
+  `let (${ID})=\\{label:${ID},effort:${ID},ultracode:${ID},isOpen:${ID}\\.isOpen,onToggle:`
 );
 
 function patchModelSwitcher(src) {
@@ -336,7 +359,7 @@ export function stripShim(src) {
   const blockRe = new RegExp(escapeRe(START) + "[\\s\\S]*?" + escapeRe(END));
   src = src.replace(blockRe, "").replace(/\s+$/, "");
   for (const p of LEGACY_API_PATCHES) src = src.split(p).join(API_ORIG);
-  src = unpatchSelectionChip(src);
+  src = unpatchSelectionShare(src);
   src = unpatchModelSwitcher(src);
   src = unpatchPermissionLabel(src);
   src = unpatchMenuButton(src);
@@ -353,9 +376,9 @@ export function stripShim(src) {
 export function applyShim(src, srcDir) {
   const misses = [];
 
-  const sel = patchSelectionChip(src);
+  const sel = patchSelectionShare(src);
   src = sel.src;
-  if (!sel.ok) misses.push("selection chip icon");
+  if (!sel.ok) misses.push("selection sharing chip");
 
   const sw = patchModelSwitcher(src);
   src = sw.src;
