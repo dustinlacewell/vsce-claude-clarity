@@ -2,7 +2,7 @@
   "name": "claude-clarity",
   "displayName": "Claude Clarity",
   "description": "Adds a model / context / rate-limit badge and a model × effort picker to the Claude Code extension's input row",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "publisher": "ldlework",
   "license": "MIT",
   "repository": {
@@ -19,7 +19,7 @@
   "scripts": {
     "sync": "node sync.mjs",
     "build": "node sync.mjs && vsce package --no-dependencies",
-    "install-local": "npm run build && code --install-extension claude-clarity-0.2.2.vsix"
+    "install-local": "npm run build && code --install-extension claude-clarity-0.2.3.vsix"
   },
   "contributes": {
     "commands": [
