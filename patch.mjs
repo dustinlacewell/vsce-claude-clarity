@@ -72,8 +72,9 @@ const ACTIVE_UNSUB = "$1($2,{usedTokens:$3.usageData.value.totalTokens";
 //     a state-aware title, and a click that toggles the flag). The `?.` covers
 //     a render before the shim's IIFE runs. The X still dismisses.
 //  2) the submit handler computes the send's include-selection flag as
-//     `let Z5=!T0;` (T0: slash command) and passes it to the logger and send —
-//     AND it with the shim flag.
+//     `let Nt=!it||_Lt(e.drawnClaudeConfig.value?.commands,re);` (it: slash
+//     command; _Lt: the command resolves against the session's command list)
+//     and passes it to the logger and send — AND it with the shim flag.
 const SELECTION_CHIP_RE = new RegExp(
   `(title:\`Showing Claude your current file selection \\(\\$\\{(${ID})\\}\\)\`,)(children:\\[${ID}\\(${ID},\\{\\}\\),)` +
     `(${ID}\\("span",\\{children:\\2\\}\\)\\])`
@@ -82,22 +83,23 @@ const SELECTION_CHIP_PATCHED_RE = new RegExp(
   `(title:\`Showing Claude your current file selection \\(\\$\\{(${ID})\\}\\)\`,)\\.\\.\\.window\\.__ccSelChip\\?\\.\\(\\2\\),` +
     `(children:\\[${ID}\\(${ID},\\{\\}\\),)!1&&(${ID}\\("span",\\{children:\\2\\}\\)\\])`
 );
+const SEND_FLAG = `!${ID}\\|\\|${ID}\\(${ID}\\.drawnClaudeConfig\\.value\\?\\.commands,${ID}\\)`;
 const SELECTION_SEND_RE = new RegExp(
-  `let (${ID})=!(${ID});(${ID}\\(${ID}\\.selection\\.value,\\1,)`
+  `let (${ID})=(${SEND_FLAG});(${ID}\\(${ID}\\.selection\\.value,\\1,)`
 );
 const SELECTION_SEND_PATCHED_RE = new RegExp(
-  `let (${ID})=!(${ID})&&window\\.__ccShareSel===!0;(${ID}\\(${ID}\\.selection\\.value,\\1,)`
+  `let (${ID})=\\((${SEND_FLAG})\\)&&window\\.__ccShareSel===!0;(${ID}\\(${ID}\\.selection\\.value,\\1,)`
 );
 
 function patchSelectionShare(src) {
   if (!SELECTION_CHIP_RE.test(src) || !SELECTION_SEND_RE.test(src)) return { src, ok: false };
   src = src.replace(SELECTION_CHIP_RE, "$1...window.__ccSelChip?.($2),$3!1&&$4");
-  src = src.replace(SELECTION_SEND_RE, "let $1=!$2&&window.__ccShareSel===!0;$3");
+  src = src.replace(SELECTION_SEND_RE, "let $1=($2)&&window.__ccShareSel===!0;$3");
   return { src, ok: true };
 }
 
 function unpatchSelectionShare(src) {
-  src = src.replace(SELECTION_SEND_PATCHED_RE, "let $1=!$2;$3");
+  src = src.replace(SELECTION_SEND_PATCHED_RE, "let $1=$2;$3");
   return src.replace(SELECTION_CHIP_PATCHED_RE, "$1$3$4");
 }
 
